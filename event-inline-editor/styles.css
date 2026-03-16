@@ -1,0 +1,473 @@
+.event-inline-view {
+  padding: 20px 24px;
+  max-width: 640px;
+}
+
+/* ─── Section Headers ───────────────────────────── */
+
+.event-inline-view h2 {
+  margin: 32px 0 8px;
+  font-size: var(--h2-size, 1.6em);
+  font-weight: var(--h2-weight, 600);
+  color: var(--text-normal);
+  border: none;
+  padding: 0 0 8px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  letter-spacing: -0.01em;
+}
+
+.event-inline-view h2:first-child {
+  margin-top: 0;
+}
+
+/* ─── Date Group Header ────────────────────────── */
+
+.event-inline-date-group {
+  font-size: var(--font-text-size);
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 16px 12px 4px;
+  letter-spacing: 0.01em;
+}
+
+.event-inline-date-group:first-of-type {
+  padding-top: 8px;
+}
+
+/* ─── Event Item ───────────────────────────────── */
+
+.event-inline-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  border-radius: 8px;
+  border: none;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+  transition: background-color 0.15s ease;
+}
+
+.event-inline-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.event-inline-item:last-child {
+  border-bottom: none;
+}
+
+/* ─── Status Button ────────────────────────────── */
+
+.event-inline-status-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  color: var(--text-faint);
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.event-inline-status-btn:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.event-inline-status-btn:focus {
+  outline: none;
+}
+
+.event-inline-item.is-done .event-inline-status-btn {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* ─── Time Display ─────────────────────────────── */
+
+.event-inline-item-time {
+  flex-shrink: 0;
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+  color: var(--interactive-accent);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  transition: background-color 0.15s ease;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.event-inline-item-time:hover {
+  background: var(--background-modifier-hover);
+}
+
+.event-inline-item-time.is-empty {
+  color: var(--text-faint);
+  font-weight: 400;
+  opacity: 0.5;
+}
+
+.event-inline-item-time.is-empty:hover {
+  opacity: 0.8;
+}
+
+/* ─── Time Editor (popup) ─────────────────────── */
+
+.event-inline-time-editor {
+  position: fixed;
+  z-index: var(--layer-popover, 100);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-s, 0 4px 16px rgba(0, 0, 0, 0.12));
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.event-inline-time-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-inline-time-label {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.event-inline-time-colon {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* ─── Custom Dropdown ─────────────────────────── */
+
+.event-inline-dropdown {
+  position: relative;
+}
+
+.event-inline-dropdown-trigger {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+  cursor: pointer;
+  min-width: 42px;
+  text-align: center;
+  font-weight: 500;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  line-height: 1.4;
+}
+
+.event-inline-dropdown-trigger:hover {
+  border-color: var(--interactive-accent);
+}
+
+.event-inline-dropdown-trigger:active,
+.event-inline-dropdown-trigger:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1.5px var(--interactive-accent-hover);
+}
+
+.event-inline-dropdown-trigger.is-placeholder {
+  color: var(--text-faint);
+}
+
+.event-inline-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+  max-height: 180px;
+  overflow-y: auto;
+  min-width: 52px;
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.event-inline-dropdown-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.event-inline-dropdown-menu::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+}
+
+.event-inline-dropdown-menu.is-open {
+  display: block;
+}
+
+.event-inline-dropdown-item {
+  padding: 4px 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.1s ease;
+  font-weight: 400;
+}
+
+.event-inline-dropdown-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.event-inline-dropdown-item.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+/* ─── Time Clear Button ───────────────────────── */
+
+.event-inline-time-editor .event-inline-time-clear {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-error, #e93147);
+  background: transparent;
+  border: 1px solid var(--text-error, #e93147);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.event-inline-time-editor .event-inline-time-clear:hover {
+  color: white;
+  background: var(--text-error, #e93147);
+  border-color: var(--text-error, #e93147);
+}
+
+/* ─── Description ──────────────────────────────── */
+
+.event-inline-item-desc {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  font-size: var(--font-text-size);
+  line-height: 1.6;
+  word-break: break-word;
+  color: var(--text-normal);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.event-inline-item-desc[contenteditable="true"]:hover {
+  background: var(--background-modifier-form-field);
+}
+
+.event-inline-item-desc:focus {
+  background: var(--background-modifier-form-field);
+  box-shadow: 0 0 0 1.5px var(--interactive-accent-hover);
+}
+
+/* ─── Done ─────────────────────────────────────── */
+
+.event-inline-item.is-done .event-inline-item-desc {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* ─── Dates (right-aligned) ────────────────────── */
+
+.event-inline-item-dates {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-inline-item-date {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.event-inline-item-date::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background-color: var(--text-faint);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='18' rx='2' ry='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='18' rx='2' ry='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.event-inline-item-date-value {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 6px;
+  transition: all 0.15s ease;
+}
+
+.event-inline-item-date-value:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.event-inline-item-date-input {
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--interactive-accent-hover);
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  width: 120px;
+  outline: none;
+}
+
+.event-inline-item-date-input:focus {
+  box-shadow: 0 0 0 1.5px var(--interactive-accent-hover);
+}
+
+/* ─── Completion Date ──────────────────────────── */
+
+.event-inline-item-date-secondary {
+  opacity: 0.65;
+}
+
+.event-inline-item-date-secondary::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+
+/* ─── Overdue ───────────────────────────────────── */
+
+.event-inline-item-overdue .event-inline-item-date {
+  color: var(--text-error);
+}
+
+.event-inline-item-overdue .event-inline-item-date::before {
+  background-color: var(--text-error);
+  opacity: 1;
+}
+
+.event-inline-item-overdue .event-inline-item-date-value {
+  color: var(--text-error);
+  font-weight: 500;
+}
+
+/* ─── Add Event ────────────────────────────────── */
+
+/* ─── Delete Button ────────────────────────────── */
+
+.event-inline-delete-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: none !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 6px;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+  padding-bottom: 3px;
+  opacity: 0.4;
+  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.event-inline-delete-btn:hover {
+  color: var(--text-error);
+  background: var(--background-modifier-hover) !important;
+  opacity: 1;
+}
+
+.event-inline-delete-btn:focus-visible {
+  color: var(--text-error);
+  opacity: 1;
+}
+
+/* ─── Add Event ────────────────────────────────── */
+
+.event-inline-add-row {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.event-inline-add-row:hover {
+  opacity: 0.8;
+}
+
+.event-inline-add-circle {
+  border-style: dashed;
+  pointer-events: none;
+}
+
+.event-inline-add-placeholder {
+  flex: 1;
+  color: var(--text-faint);
+  font-style: italic;
+  pointer-events: none;
+}
+
+.event-inline-add-input {
+  flex: 1;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  font-size: var(--font-text-size);
+  line-height: 1.6;
+  border: none;
+  border-radius: 4px;
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--interactive-accent-hover);
+}

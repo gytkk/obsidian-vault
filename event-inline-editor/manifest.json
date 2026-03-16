@@ -1,0 +1,9 @@
+{
+  "id": "event-inline-editor",
+  "name": "Event Inline Editor",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Inline editable event dashboard for the events/ directory.",
+  "author": "gytkk",
+  "isDesktopOnly": false
+}
