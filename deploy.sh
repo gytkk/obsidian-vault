@@ -17,9 +17,9 @@ deploy_plugin() {
     return 1
   fi
 
-  # Build
+  # Install dependencies & build
   echo "Building $plugin..."
-  (cd "$src" && bun run build)
+  (cd "$src" && bun install --frozen-lockfile && bun run build)
 
   # Copy artifacts
   mkdir -p "$dest"
