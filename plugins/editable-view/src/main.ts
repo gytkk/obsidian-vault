@@ -915,6 +915,15 @@ class EditableViewRenderer {
     }
   }
 
+  private isPopupEvent(ev: MouseEvent, popup: HTMLElement): boolean {
+    const path = typeof ev.composedPath === 'function' ? ev.composedPath() : [];
+    if (path.length > 0) {
+      return path.includes(popup);
+    }
+
+    return popup.contains(ev.target as Node);
+  }
+
   async render(container: HTMLElement): Promise<void> {
     // Guard against concurrent renders
     if (this.isRendering) {
@@ -1316,7 +1325,7 @@ class EditableViewRenderer {
 
     setTimeout(() => {
       this.activePopupHandler = (ev: MouseEvent) => {
-        if (!popup.contains(ev.target as Node)) {
+        if (!this.isPopupEvent(ev, popup)) {
           this.closeActivePopup();
         }
       };
@@ -1481,7 +1490,7 @@ class EditableViewRenderer {
 
     setTimeout(() => {
       this.activePopupHandler = (ev: MouseEvent) => {
-        if (!popup.contains(ev.target as Node)) {
+        if (!this.isPopupEvent(ev, popup)) {
           this.closeActivePopup();
           commitSelection();
         }
@@ -1633,7 +1642,7 @@ class EditableViewRenderer {
 
     setTimeout(() => {
       this.activePopupHandler = (ev: MouseEvent) => {
-        if (!popup.contains(ev.target as Node)) {
+        if (!this.isPopupEvent(ev, popup)) {
           this.closeActivePopup();
         }
       };
@@ -1684,7 +1693,7 @@ class EditableViewRenderer {
 
     setTimeout(() => {
       this.activePopupHandler = (ev: MouseEvent) => {
-        if (!popup.contains(ev.target as Node)) {
+        if (!this.isPopupEvent(ev, popup)) {
           this.closeActivePopup();
           const newValue = [...selected].join(', ');
           if (newValue !== value) {
