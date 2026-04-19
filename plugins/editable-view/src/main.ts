@@ -1236,7 +1236,7 @@ class EditableViewRenderer {
     };
 
     const renderList = () => {
-      const { ordered, recommended, showRecommendations } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
+      const { ordered } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
       if (activeIndex >= ordered.length) activeIndex = Math.max(ordered.length - 1, 0);
 
       list.empty();
@@ -1245,19 +1245,7 @@ class EditableViewRenderer {
         return;
       }
 
-      let renderedRecommendationHeader = false;
-      let renderedAllHeader = false;
       ordered.forEach((candidate, index) => {
-        const isRecommended = recommended.has(candidate.filePath);
-        if (showRecommendations && isRecommended && !renderedRecommendationHeader) {
-          list.createDiv({ cls: 'ev-relation-section', text: '추천' });
-          renderedRecommendationHeader = true;
-        }
-        if (showRecommendations && !isRecommended && !renderedAllHeader) {
-          list.createDiv({ cls: 'ev-relation-section ev-relation-section-secondary', text: '전체' });
-          renderedAllHeader = true;
-        }
-
         const item = list.createDiv({ cls: 'ev-dropdown-item ev-relation-item' });
         if (candidate.filePath === selectedPath) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
@@ -1387,7 +1375,7 @@ class EditableViewRenderer {
     };
 
     const renderList = () => {
-      const { ordered, recommended, showRecommendations } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
+      const { ordered } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
       if (activeIndex >= ordered.length) activeIndex = Math.max(ordered.length - 1, 0);
 
       list.empty();
@@ -1396,19 +1384,7 @@ class EditableViewRenderer {
         return;
       }
 
-      let renderedRecommendationHeader = false;
-      let renderedAllHeader = false;
       ordered.forEach((candidate, index) => {
-        const isRecommended = recommended.has(candidate.filePath);
-        if (showRecommendations && isRecommended && !renderedRecommendationHeader) {
-          list.createDiv({ cls: 'ev-relation-section', text: '추천' });
-          renderedRecommendationHeader = true;
-        }
-        if (showRecommendations && !isRecommended && !renderedAllHeader) {
-          list.createDiv({ cls: 'ev-relation-section ev-relation-section-secondary', text: '전체' });
-          renderedAllHeader = true;
-        }
-
         const item = list.createDiv({ cls: 'ev-dropdown-multi-item ev-relation-item' });
         if (selectedPaths.has(candidate.filePath)) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
