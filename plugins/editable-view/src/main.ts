@@ -8,7 +8,7 @@ const MAX_RELATION_HISTORY = 10;
 
 // ─── Types ──────────────────────────────────────────────────
 
-type FieldType = 'input' | 'number' | 'date' | 'url' | 'dropdown' | 'dropdown-multi' | 'checkbox' | 'relation' | 'relation-multi' | 'lookup';
+type FieldType = 'input' | 'number' | 'date' | 'url' | 'dropdown' | 'dropdown-multi' | 'combobox' | 'checkbox' | 'relation' | 'relation-multi' | 'lookup';
 
 interface FieldConfig {
   name: string;
@@ -62,7 +62,7 @@ interface WikiLinkPart {
   label: string;
 }
 
-const FIELD_TYPES: FieldType[] = ['input', 'number', 'date', 'url', 'dropdown', 'dropdown-multi', 'checkbox', 'relation', 'relation-multi', 'lookup'];
+const FIELD_TYPES: FieldType[] = ['input', 'number', 'date', 'url', 'dropdown', 'dropdown-multi', 'combobox', 'checkbox', 'relation', 'relation-multi', 'lookup'];
 const UNTITLED_FILE_RE = /^Untitled(?: \d+)?$/;
 
 // ─── ConfigParser ───────────────────────────────────────────
@@ -1074,6 +1074,9 @@ class EditableViewRenderer {
       case 'lookup':
         this.renderLookupCell(td, field, record);
         break;
+      case 'combobox':
+        this.renderComboboxCell(td, value, field, record, container);
+        break;
       case 'dropdown':
       case 'dropdown-multi':
         this.renderTagCell(td, value, field, record, container);
@@ -1182,6 +1185,17 @@ class EditableViewRenderer {
     this.renderLinkedTextParts(td, this.getLookupRawValue(record, field), record.filePath);
   }
 
+  private renderComboboxCell(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
+    td.classList.add('ev-td-editable');
+    this.renderLinkedTextParts(td, value, record.filePath);
+
+    td.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target instanceof HTMLElement && e.target.closest('a')) return;
+      this.showComboboxPicker(td, value, field, record, container);
+    });
+  }
+
   private buildRelationValue(targetRecord: FileRecord, sourcePath: string): string {
     const file = this.app.vault.getAbstractFileByPath(targetRecord.filePath);
     if (!file || !(file instanceof TFile)) return `[[${targetRecord.fileName}]]`;
@@ -1190,6 +1204,152 @@ class EditableViewRenderer {
     return linkText === targetRecord.fileName
       ? `[[${linkText}]]`
       : `[[${linkText}|${targetRecord.fileName}]]`;
+  }
+
+  private showComboboxPicker(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
+    this.closeActivePopup();
+
+    const popup = document.createElement('div');
+    popup.className = 'ev-dropdown-popup ev-relation-popup';
+    this.activePopup = popup;
+
+    const searchInput = document.createElement('input');
+    searchInput.className = 'ev-relation-search';
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Select or type a value...';
+    searchInput.value = value;
+    popup.appendChild(searchInput);
+
+    const list = document.createElement('div');
+    list.className = 'ev-relation-list';
+    popup.appendChild(list);
+
+    let activeIndex = 0;
+
+    const getFilteredOptions = () => {
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) return field.options;
+
+      return field.options.filter((option) => option.toLowerCase().includes(query));
+    };
+
+    const getCustomValue = () => {
+      const trimmed = searchInput.value.trim();
+      if (!trimmed) return '';
+      return field.options.some((option) => option === trimmed) ? '' : trimmed;
+    };
+
+    const getEntries = () => {
+      const filteredOptions = getFilteredOptions();
+      const customValue = getCustomValue();
+      const entries: Array<{ type: 'custom' | 'option'; value: string }> = [];
+      if (customValue) {
+        entries.push({ type: 'custom', value: customValue });
+      }
+      entries.push(...filteredOptions.map((option) => ({ type: 'option' as const, value: option })));
+      return entries;
+    };
+
+    const commitValue = (nextValue: string) => {
+      this.closeActivePopup();
+      if (nextValue !== value) {
+        this.commitField(record.filePath, field.name, nextValue, container);
+      }
+    };
+
+    const renderList = () => {
+      const entries = getEntries();
+      if (activeIndex >= entries.length) activeIndex = Math.max(entries.length - 1, 0);
+
+      list.empty();
+      if (entries.length === 0) {
+        list.createDiv({ cls: 'ev-relation-empty', text: 'No matches' });
+        return;
+      }
+
+      entries.forEach((entry, index) => {
+        const item = list.createDiv({ cls: 'ev-dropdown-item ev-relation-item' });
+        if (entry.type === 'option' && entry.value === value) item.addClass('is-selected');
+        if (index === activeIndex) item.addClass('is-active');
+
+        item.createDiv({ cls: 'ev-relation-item-main', text: entry.value });
+        if (entry.type === 'custom') {
+          item.createDiv({ cls: 'ev-relation-item-meta', text: '새 값으로 입력' });
+          item.addClass('ev-combobox-item-custom');
+        }
+
+        item.addEventListener('mouseenter', () => {
+          activeIndex = index;
+        });
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          commitValue(entry.value);
+        });
+      });
+    };
+
+    searchInput.addEventListener('input', () => {
+      activeIndex = 0;
+      renderList();
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      const entries = getEntries();
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (entries.length > 0) activeIndex = Math.min(activeIndex + 1, entries.length - 1);
+        renderList();
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (entries.length > 0) activeIndex = Math.max(activeIndex - 1, 0);
+        renderList();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const entry = entries[activeIndex];
+        if (entry) {
+          commitValue(entry.value);
+          return;
+        }
+
+        const customValue = searchInput.value.trim();
+        if (customValue) {
+          commitValue(customValue);
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeActivePopup();
+      }
+    });
+
+    const clearItem = document.createElement('div');
+    clearItem.className = 'ev-dropdown-item ev-dropdown-clear';
+    clearItem.textContent = '비우기';
+    clearItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeActivePopup();
+      if (value) {
+        this.commitField(record.filePath, field.name, '', container);
+      }
+    });
+    popup.appendChild(clearItem);
+
+    renderList();
+    document.body.appendChild(popup);
+    this.positionPopup(popup, td);
+    searchInput.focus();
+    searchInput.select();
+
+    setTimeout(() => {
+      this.activePopupHandler = (ev: MouseEvent) => {
+        if (!this.isPopupEvent(ev, popup)) {
+          this.closeActivePopup();
+        }
+      };
+      document.addEventListener('click', this.activePopupHandler);
+    }, 0);
   }
 
   private showRelationPicker(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
