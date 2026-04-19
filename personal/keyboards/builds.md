@@ -5,13 +5,15 @@ tags:
 
 # Builds
 
-```dataview
-TABLE WITHOUT ID
-  file.link AS 빌드,
-  보드,
-  상태,
-  날짜,
-  비고
-FROM "keyboards/builds"
-SORT file.name ASC
+```editable-view
+source: "keyboards/builds"
+fields:
+  - name: 보드
+    type: input
+  - name: 상태
+    type: input
+  - name: 날짜
+    type: date
+  - name: 비고
+    type: input
 ```

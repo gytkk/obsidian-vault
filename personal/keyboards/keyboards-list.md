@@ -6,6 +6,10 @@ cssclasses:
 ---
 # Keyboard List
 
+## Builds
+
+![[builds]]
+
 ## Boards
 
 ```editable-view
@@ -26,10 +30,6 @@ fields:
   - name: url
     type: url
 ```
-
-## Builds
-
-![[builds]]
 
 ## Keycaps
 
