@@ -179,6 +179,16 @@
   background: var(--background-modifier-form-field);
 }
 
+.ev-text-link {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.ev-text-link:hover {
+  color: var(--link-color-hover, var(--link-color));
+  text-decoration: underline;
+}
+
 /* ─── Name Cell ────────────────────────────────── */
 
 .ev-td-name {

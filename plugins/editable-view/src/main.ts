@@ -41,6 +41,10 @@ interface PluginData {
   tables: Record<string, TableState>;
 }
 
+type TextCellPart =
+  | { type: 'text'; text: string }
+  | { type: 'wikilink'; target: string; label: string };
+
 // ─── ConfigParser ───────────────────────────────────────────
 
 function parseConfig(source: string): EditableViewConfig | null {
@@ -221,6 +225,40 @@ function hashString(str: string): number {
     hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
+}
+
+function parseTextCellParts(value: string): TextCellPart[] | null {
+  const wikiLinkRe = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+  const parts: TextCellPart[] = [];
+  let lastIndex = 0;
+  let hasWikiLink = false;
+
+  for (const match of value.matchAll(wikiLinkRe)) {
+    const fullMatch = match[0] ?? '';
+    const target = match[1]?.trim() ?? '';
+    const label = (match[2] ?? target).trim();
+    const index = match.index ?? 0;
+
+    if (index > lastIndex) {
+      parts.push({ type: 'text', text: value.slice(lastIndex, index) });
+    }
+
+    if (target) {
+      parts.push({ type: 'wikilink', target, label: label || target });
+      hasWikiLink = true;
+    } else {
+      parts.push({ type: 'text', text: fullMatch });
+    }
+
+    lastIndex = index + fullMatch.length;
+  }
+
+  if (!hasWikiLink) return null;
+  if (lastIndex < value.length) {
+    parts.push({ type: 'text', text: value.slice(lastIndex) });
+  }
+
+  return parts;
 }
 
 // ─── EditableViewRenderer ───────────────────────────────────
@@ -568,11 +606,36 @@ class EditableViewRenderer {
   // ─── Cell Renderers ─────────────────────────────
 
   private renderTextCell(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
-    td.textContent = value;
+    td.empty();
     td.classList.add('ev-td-editable');
+    const parts = parseTextCellParts(value);
 
-    td.addEventListener('click', () => {
+    if (parts) {
+      td.classList.add('ev-td-has-wikilinks');
+      for (const part of parts) {
+        if (part.type === 'text') {
+          if (!part.text) continue;
+          td.createSpan({ cls: 'ev-text-fragment', text: part.text });
+          continue;
+        }
+
+        const link = td.createEl('a', {
+          cls: 'internal-link ev-text-link',
+          text: part.label,
+        });
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.app.workspace.openLinkText(part.target, record.filePath);
+        });
+      }
+    } else {
+      td.textContent = value;
+    }
+
+    td.addEventListener('click', (e) => {
       if (td.querySelector('input')) return;
+      if (e.target instanceof HTMLElement && e.target.closest('a')) return;
 
       const inputType = field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text';
       td.empty();
