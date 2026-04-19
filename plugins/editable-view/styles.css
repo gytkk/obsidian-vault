@@ -401,6 +401,19 @@
   background: var(--background-modifier-hover);
 }
 
+.ev-dropdown-multi-item.is-selected {
+  background: var(--interactive-accent);
+}
+
+.ev-dropdown-multi-item.is-selected .ev-relation-item-main,
+.ev-dropdown-multi-item.is-selected .ev-relation-item-meta {
+  color: var(--text-on-accent);
+}
+
+.ev-dropdown-multi-item.is-selected input[type="checkbox"] {
+  accent-color: var(--text-on-accent);
+}
+
 .ev-relation-item-main {
   color: var(--text-normal);
   font-size: var(--font-text-size);
