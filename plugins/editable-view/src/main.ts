@@ -1269,7 +1269,6 @@ class EditableViewRenderer {
 
         item.addEventListener('mouseenter', () => {
           activeIndex = index;
-          renderList();
         });
         item.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1431,7 +1430,6 @@ class EditableViewRenderer {
 
         item.addEventListener('mouseenter', () => {
           activeIndex = index;
-          renderList();
         });
         item.addEventListener('click', (e) => {
           e.stopPropagation();

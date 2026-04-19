@@ -401,7 +401,9 @@
   background: var(--background-modifier-hover);
 }
 
-.ev-dropdown-multi-item.is-selected {
+.ev-dropdown-multi-item.is-selected,
+.ev-dropdown-multi-item.is-selected:hover,
+.ev-dropdown-multi-item.is-selected.is-active {
   background: var(--interactive-accent);
 }
 
