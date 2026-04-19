@@ -382,6 +382,21 @@
   gap: 2px;
 }
 
+.ev-relation-section {
+  padding: 6px 10px 2px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ev-relation-section-secondary {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
 .ev-relation-item.is-active {
   background: var(--background-modifier-hover);
 }

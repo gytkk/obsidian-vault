@@ -4,6 +4,7 @@ import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, Plugin,
 
 const INLINE_FIELD_RE = /^([^:\n]+)::\s*(.*)$/;
 const DEBOUNCE_MS = 300;
+const MAX_RELATION_HISTORY = 10;
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ interface TableState {
 
 interface PluginData {
   tables: Record<string, TableState>;
+  relationHistory: Record<string, string[]>;
 }
 
 type TextCellPart =
@@ -441,6 +443,7 @@ class EditableViewRenderer {
     private pluginData: PluginData,
     private onStateChange: () => void,
   ) {
+    this.pluginData.relationHistory ??= {};
     this.state = pluginData.tables[config.source] ?? {
       columnOrder: config.fields.map((f) => f.name),
       hiddenColumns: [],
@@ -460,8 +463,17 @@ class EditableViewRenderer {
   }
 
   /** Update a field value, invalidate cache, and re-render */
-  private commitField(filePath: string, fieldName: string, newValue: string, container: HTMLElement): void {
+  private commitField(
+    filePath: string,
+    fieldName: string,
+    newValue: string,
+    container: HTMLElement,
+    onSuccess?: () => void | Promise<void>,
+  ): void {
     updateField(this.app, filePath, fieldName, newValue, this.isUpdatingRef).then(async () => {
+      if (onSuccess) {
+        await onSuccess();
+      }
       this.invalidateCache();
       await this.preloadRelatedSources(this.config.fields);
       await this.maybeAutoRenameRecord(filePath);
@@ -657,6 +669,28 @@ class EditableViewRenderer {
     return this.config.fields.find((f) => f.name === name);
   }
 
+  private getRelationHistoryKey(field: FieldConfig): string {
+    return `${this.config.source}::${field.name}`;
+  }
+
+  private getRelationHistory(field: FieldConfig): string[] {
+    return this.pluginData.relationHistory[this.getRelationHistoryKey(field)] ?? [];
+  }
+
+  private recordRelationSelection(field: FieldConfig, targetRecords: FileRecord[]): void {
+    if (targetRecords.length === 0) return;
+
+    const key = this.getRelationHistoryKey(field);
+    const selectedPaths = targetRecords.map((record) => record.filePath);
+    const deduped = [
+      ...selectedPaths,
+      ...this.getRelationHistory(field).filter((filePath) => !selectedPaths.includes(filePath)),
+    ];
+
+    this.pluginData.relationHistory[key] = deduped.slice(0, MAX_RELATION_HISTORY);
+    this.onStateChange();
+  }
+
   private async ensureSourceRecords(source: string): Promise<FileRecord[]> {
     const cached = this.sourceRecordCache.get(source);
     if (cached) return cached;
@@ -711,6 +745,91 @@ class EditableViewRenderer {
     if (!field.source) return [];
     return [...(this.sourceRecordCache.get(field.source) ?? [])]
       .sort((a, b) => a.fileName.localeCompare(b.fileName, 'ko'));
+  }
+
+  private filterRelationCandidates(relationRecords: FileRecord[], query: string): FileRecord[] {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return relationRecords;
+
+    return relationRecords.filter((candidate) => {
+      const haystack = [candidate.fileName, ...candidate.aliases].join(' ').toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }
+
+  private getRelationUsageCounts(field: FieldConfig): Map<string, number> {
+    const counts = new Map<string, number>();
+    if (!this.cachedRecords) return counts;
+
+    const allowMultiple = field.type === 'relation-multi';
+    for (const record of this.cachedRecords) {
+      const resolvedPaths = new Set(
+        this.getRelationLinks(record.fields[field.name] ?? '', allowMultiple)
+          .map((link) => this.resolveRelationRecord(link.target, field, record.filePath)?.filePath ?? null)
+          .filter((filePath): filePath is string => filePath !== null),
+      );
+
+      for (const filePath of resolvedPaths) {
+        counts.set(filePath, (counts.get(filePath) ?? 0) + 1);
+      }
+    }
+
+    return counts;
+  }
+
+  private getRecommendedRelationPaths(field: FieldConfig, relationRecords: FileRecord[]): string[] {
+    const availablePaths = new Set(relationRecords.map((record) => record.filePath));
+    const recommended: string[] = [];
+
+    for (const filePath of this.getRelationHistory(field)) {
+      if (availablePaths.has(filePath) && !recommended.includes(filePath)) {
+        recommended.push(filePath);
+      }
+    }
+
+    const usageCounts = this.getRelationUsageCounts(field);
+    const frequentRecords = relationRecords
+      .filter((record) => !recommended.includes(record.filePath) && (usageCounts.get(record.filePath) ?? 0) > 0)
+      .sort((a, b) => {
+        const countDiff = (usageCounts.get(b.filePath) ?? 0) - (usageCounts.get(a.filePath) ?? 0);
+        if (countDiff !== 0) return countDiff;
+        return a.fileName.localeCompare(b.fileName, 'ko');
+      });
+
+    for (const record of frequentRecords) {
+      recommended.push(record.filePath);
+    }
+
+    return recommended;
+  }
+
+  private getRelationDisplayGroups(field: FieldConfig, relationRecords: FileRecord[], currentValue: string, query: string): {
+    ordered: FileRecord[];
+    recommended: Set<string>;
+    showRecommendations: boolean;
+  } {
+    const filtered = this.filterRelationCandidates(relationRecords, query);
+    const shouldRecommend = !currentValue.trim() && !query.trim();
+    if (!shouldRecommend) {
+      return {
+        ordered: filtered,
+        recommended: new Set<string>(),
+        showRecommendations: false,
+      };
+    }
+
+    const filteredByPath = new Map(filtered.map((record) => [record.filePath, record]));
+    const recommendedRecords = this.getRecommendedRelationPaths(field, relationRecords)
+      .map((filePath) => filteredByPath.get(filePath))
+      .filter((record): record is FileRecord => record !== undefined);
+    const recommendedPaths = new Set(recommendedRecords.map((record) => record.filePath));
+    const remainingRecords = filtered.filter((record) => !recommendedPaths.has(record.filePath));
+
+    return {
+      ordered: [...recommendedRecords, ...remainingRecords],
+      recommended: recommendedPaths,
+      showRecommendations: recommendedRecords.length > 0,
+    };
   }
 
   private buildRelationListValue(targetRecords: FileRecord[], sourcePath: string): string {
@@ -1094,34 +1213,42 @@ class EditableViewRenderer {
     let activeIndex = 0;
 
     const getFiltered = () => {
-      const query = searchInput.value.trim().toLowerCase();
-      if (!query) return relationRecords;
-
-      return relationRecords.filter((candidate) => {
-        const haystack = [candidate.fileName, ...candidate.aliases].join(' ').toLowerCase();
-        return haystack.includes(query);
-      });
+      return this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value).ordered;
     };
 
     const chooseRecord = (targetRecord: FileRecord) => {
       this.closeActivePopup();
       const newValue = this.buildRelationValue(targetRecord, record.filePath);
       if (newValue !== value) {
-        this.commitField(record.filePath, field.name, newValue, container);
+        this.commitField(record.filePath, field.name, newValue, container, () => {
+          this.recordRelationSelection(field, [targetRecord]);
+        });
       }
     };
 
     const renderList = () => {
-      const filtered = getFiltered();
-      if (activeIndex >= filtered.length) activeIndex = Math.max(filtered.length - 1, 0);
+      const { ordered, recommended, showRecommendations } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
+      if (activeIndex >= ordered.length) activeIndex = Math.max(ordered.length - 1, 0);
 
       list.empty();
-      if (filtered.length === 0) {
+      if (ordered.length === 0) {
         list.createDiv({ cls: 'ev-relation-empty', text: 'No matches' });
         return;
       }
 
-      filtered.forEach((candidate, index) => {
+      let renderedRecommendationHeader = false;
+      let renderedAllHeader = false;
+      ordered.forEach((candidate, index) => {
+        const isRecommended = recommended.has(candidate.filePath);
+        if (showRecommendations && isRecommended && !renderedRecommendationHeader) {
+          list.createDiv({ cls: 'ev-relation-section', text: '추천' });
+          renderedRecommendationHeader = true;
+        }
+        if (showRecommendations && !isRecommended && !renderedAllHeader) {
+          list.createDiv({ cls: 'ev-relation-section ev-relation-section-secondary', text: '전체' });
+          renderedAllHeader = true;
+        }
+
         const item = list.createDiv({ cls: 'ev-dropdown-item ev-relation-item' });
         if (candidate.filePath === selectedPath) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
@@ -1229,20 +1356,16 @@ class EditableViewRenderer {
     let activeIndex = 0;
 
     const getFiltered = () => {
-      const query = searchInput.value.trim().toLowerCase();
-      if (!query) return relationRecords;
-
-      return relationRecords.filter((candidate) => {
-        const haystack = [candidate.fileName, ...candidate.aliases].join(' ').toLowerCase();
-        return haystack.includes(query);
-      });
+      return this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value).ordered;
     };
 
     const commitSelection = () => {
       const selectedRecords = relationRecords.filter((candidate) => selectedPaths.has(candidate.filePath));
       const newValue = this.buildRelationListValue(selectedRecords, record.filePath);
       if (newValue !== value) {
-        this.commitField(record.filePath, field.name, newValue, container);
+        this.commitField(record.filePath, field.name, newValue, container, () => {
+          this.recordRelationSelection(field, selectedRecords);
+        });
       }
     };
 
@@ -1256,16 +1379,28 @@ class EditableViewRenderer {
     };
 
     const renderList = () => {
-      const filtered = getFiltered();
-      if (activeIndex >= filtered.length) activeIndex = Math.max(filtered.length - 1, 0);
+      const { ordered, recommended, showRecommendations } = this.getRelationDisplayGroups(field, relationRecords, value, searchInput.value);
+      if (activeIndex >= ordered.length) activeIndex = Math.max(ordered.length - 1, 0);
 
       list.empty();
-      if (filtered.length === 0) {
+      if (ordered.length === 0) {
         list.createDiv({ cls: 'ev-relation-empty', text: 'No matches' });
         return;
       }
 
-      filtered.forEach((candidate, index) => {
+      let renderedRecommendationHeader = false;
+      let renderedAllHeader = false;
+      ordered.forEach((candidate, index) => {
+        const isRecommended = recommended.has(candidate.filePath);
+        if (showRecommendations && isRecommended && !renderedRecommendationHeader) {
+          list.createDiv({ cls: 'ev-relation-section', text: '추천' });
+          renderedRecommendationHeader = true;
+        }
+        if (showRecommendations && !isRecommended && !renderedAllHeader) {
+          list.createDiv({ cls: 'ev-relation-section ev-relation-section-secondary', text: '전체' });
+          renderedAllHeader = true;
+        }
+
         const item = list.createEl('label', { cls: 'ev-dropdown-multi-item ev-relation-item' });
         if (selectedPaths.has(candidate.filePath)) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
@@ -1680,12 +1815,22 @@ class EditableViewRenderer {
 // ─── Plugin ─────────────────────────────────────────────────
 
 export default class EditableViewPlugin extends Plugin {
-  private pluginData: PluginData = { tables: {} };
+  private pluginData: PluginData = { tables: {}, relationHistory: {} };
 
   async onload(): Promise<void> {
     const saved = await this.loadData();
-    if (saved && typeof saved === 'object' && 'tables' in saved) {
-      this.pluginData = saved as PluginData;
+    if (saved && typeof saved === 'object') {
+      const savedData = saved as Record<string, unknown>;
+      const tables = savedData['tables'];
+      const relationHistory = savedData['relationHistory'];
+      this.pluginData = {
+        tables: tables && typeof tables === 'object' && !Array.isArray(tables)
+          ? tables as Record<string, TableState>
+          : {},
+        relationHistory: relationHistory && typeof relationHistory === 'object' && !Array.isArray(relationHistory)
+          ? relationHistory as Record<string, string[]>
+          : {},
+      };
     }
 
     this.registerMarkdownCodeBlockProcessor(
