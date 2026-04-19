@@ -8,6 +8,10 @@ tags:
 보드:: [[Lena Mini]]
 상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: 핫스왑
+보강판:: ALU
+스위치:: [[다신흑]]
+키캡:: [[SWG Nimbus]]
 
 ## PCB / 보강판
 

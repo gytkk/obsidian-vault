@@ -8,6 +8,10 @@ tags:
 보드:: [[Keycult No. 2-65|Keycult No. 2/65]]
 상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: 핫스왑
+보강판:: ALU
+스위치:: [[HMX RAW]]
+키캡:: [[GMK Future Funk R2]]
 
 ## PCB / 보강판
 

@@ -6,8 +6,11 @@ tags:
 # Brick65 - Current
 
 보드:: [[Brick65]]
-상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: 8k 솔더링(밀맥)
+보강판:: PC
+스위치:: [[거인의 심장 3핀]]
+키캡:: [[GMK Violet Alert]]
 
 ## PCB / 보강판
 

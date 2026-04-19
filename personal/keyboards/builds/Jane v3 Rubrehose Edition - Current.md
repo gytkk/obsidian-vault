@@ -8,6 +8,10 @@ tags:
 보드:: [[Jane v3 Rubrehose Edition]]
 상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: 솔더링
+보강판:: ALU
+스위치:: [[다사신흑]]
+키캡:: [[GMK Rubrehose]]
 
 ## PCB / 보강판
 

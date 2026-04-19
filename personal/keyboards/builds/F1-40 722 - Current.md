@@ -8,6 +8,10 @@ tags:
 보드:: [[F1-40 722]]
 상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: Ortho 솔더링(밀맥)
+보강판:: ALU
+스위치:: [[GEON RAW ZERO]]
+키캡:: [[GMK Black Snail]]
 
 ## PCB / 보강판
 

@@ -8,6 +8,10 @@ tags:
 보드:: [[Keycult No. 1-60|Keycult No. 1/60]]
 상태:: current
 비고:: 기존 보드 노트의 현재 구성에서 이전
+PCB:: 핫스왑
+보강판:: PC
+스위치:: 
+키캡:: [[GMK Black Snail]]
 
 ## PCB / 보강판
 
