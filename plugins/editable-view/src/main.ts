@@ -335,6 +335,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function sanitizeFileName(value: string): string {
+  return value
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function parseTextCellParts(value: string): TextCellPart[] | null {
   const wikiLinkRe = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
   const parts: TextCellPart[] = [];
@@ -472,7 +479,7 @@ class EditableViewRenderer {
   }
 
   private getUniqueFileName(baseName: string): string {
-    const trimmed = baseName.trim() || 'Untitled';
+    const trimmed = sanitizeFileName(baseName) || 'Untitled';
     let fileName = trimmed;
     let counter = 1;
     while (this.app.vault.getAbstractFileByPath(`${this.config.source}/${fileName}.md`)) {
