@@ -1401,12 +1401,15 @@ class EditableViewRenderer {
           renderedAllHeader = true;
         }
 
-        const item = list.createEl('label', { cls: 'ev-dropdown-multi-item ev-relation-item' });
+        const item = list.createDiv({ cls: 'ev-dropdown-multi-item ev-relation-item' });
         if (selectedPaths.has(candidate.filePath)) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
 
         const checkbox = item.createEl('input', { type: 'checkbox' });
         checkbox.checked = selectedPaths.has(candidate.filePath);
+        checkbox.addEventListener('click', (e) => {
+          e.stopPropagation();
+        });
         checkbox.addEventListener('change', () => {
           toggleRecord(candidate);
         });
