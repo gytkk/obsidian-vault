@@ -9,9 +9,19 @@ tags:
 source: "keyboards/builds"
 fields:
   - name: 보드
-    type: input
+    type: relation
+    source: "keyboards/boards"
+  - name: 제작사
+    type: lookup
+    relation: 보드
+    field: 제작사
+  - name: 레이아웃
+    type: lookup
+    relation: 보드
+    field: 레이아웃
   - name: 상태
-    type: input
+    type: dropdown
+    options: [current, archived]
   - name: 비고
     type: input
 ```
