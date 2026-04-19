@@ -7,7 +7,6 @@ tags:
 
 보드:: [[Keycult No. 1-60|Keycult No. 1/60]]
 상태:: current
-날짜:: 
 비고:: 기존 보드 노트의 현재 구성에서 이전
 
 ## PCB / 보강판

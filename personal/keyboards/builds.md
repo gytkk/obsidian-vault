@@ -12,8 +12,6 @@ fields:
     type: input
   - name: 상태
     type: input
-  - name: 날짜
-    type: date
   - name: 비고
     type: input
 ```
