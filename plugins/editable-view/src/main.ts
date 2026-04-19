@@ -7,7 +7,7 @@ const DEBOUNCE_MS = 300;
 
 // ─── Types ──────────────────────────────────────────────────
 
-type FieldType = 'input' | 'number' | 'date' | 'url' | 'dropdown' | 'dropdown-multi' | 'checkbox' | 'relation' | 'lookup';
+type FieldType = 'input' | 'number' | 'date' | 'url' | 'dropdown' | 'dropdown-multi' | 'checkbox' | 'relation' | 'relation-multi' | 'lookup';
 
 interface FieldConfig {
   name: string;
@@ -17,11 +17,16 @@ interface FieldConfig {
   relation?: string;
   field?: string;
   display?: 'fileName' | 'path';
+  separator?: string;
 }
 
 interface EditableViewConfig {
   source: string;
   fields: FieldConfig[];
+  template?: string;
+  defaults: Record<string, unknown>;
+  titlePattern?: string;
+  newFileName?: string;
 }
 
 interface FileRecord {
@@ -55,7 +60,8 @@ interface WikiLinkPart {
   label: string;
 }
 
-const FIELD_TYPES: FieldType[] = ['input', 'number', 'date', 'url', 'dropdown', 'dropdown-multi', 'checkbox', 'relation', 'lookup'];
+const FIELD_TYPES: FieldType[] = ['input', 'number', 'date', 'url', 'dropdown', 'dropdown-multi', 'checkbox', 'relation', 'relation-multi', 'lookup'];
+const UNTITLED_FILE_RE = /^Untitled(?: \d+)?$/;
 
 // ─── ConfigParser ───────────────────────────────────────────
 
@@ -76,6 +82,10 @@ function normalizeConfig(raw: unknown): EditableViewConfig | null {
   const config = raw as Record<string, unknown>;
   const sourceValue = config['source'];
   const fieldsValue = config['fields'];
+  const templateValue = config['template'];
+  const defaultsValue = config['defaults'];
+  const titlePatternValue = config['titlePattern'];
+  const newFileNameValue = config['newFileName'];
   const sourcePath = typeof sourceValue === 'string' ? sourceValue.trim() : '';
   const rawFields = Array.isArray(fieldsValue)
     ? fieldsValue as unknown[]
@@ -85,7 +95,16 @@ function normalizeConfig(raw: unknown): EditableViewConfig | null {
     .filter((field): field is FieldConfig => field !== null);
 
   if (!sourcePath || fields.length === 0) return null;
-  return { source: sourcePath, fields };
+  return {
+    source: sourcePath,
+    fields,
+    template: typeof templateValue === 'string' && templateValue.trim() ? templateValue.trim() : undefined,
+    defaults: defaultsValue && typeof defaultsValue === 'object' && !Array.isArray(defaultsValue)
+      ? defaultsValue as Record<string, unknown>
+      : {},
+    titlePattern: typeof titlePatternValue === 'string' && titlePatternValue.trim() ? titlePatternValue.trim() : undefined,
+    newFileName: typeof newFileNameValue === 'string' && newFileNameValue.trim() ? newFileNameValue.trim() : undefined,
+  };
 }
 
 function normalizeFieldConfig(raw: unknown): FieldConfig | null {
@@ -109,8 +128,11 @@ function normalizeFieldConfig(raw: unknown): FieldConfig | null {
     ? obj['field'].trim()
     : undefined;
   const display = obj['display'] === 'path' ? 'path' : 'fileName';
+  const separator = typeof obj['separator'] === 'string' && obj['separator'].trim()
+    ? obj['separator'].trim()
+    : undefined;
 
-  return { name, type, options, source, relation, field, display };
+  return { name, type, options, source, relation, field, display, separator };
 }
 
 function isFieldType(value: unknown): value is FieldType {
@@ -166,7 +188,7 @@ function parseConfigLegacy(source: string): EditableViewConfig | null {
   if (currentField) fields.push(currentField);
 
   if (fields.length === 0) return null;
-  return { source: sourcePath, fields };
+  return { source: sourcePath, fields, defaults: {} };
 }
 
 // ─── DataLoader ─────────────────────────────────────────────
@@ -233,6 +255,54 @@ function getFileAliases(app: App, file: TFile): string[] {
 
 // ─── FileWriter ─────────────────────────────────────────────
 
+function upsertInlineField(data: string, fieldName: string, newValue: string): string {
+  const lines = data.split('\n');
+  let inFrontmatter = false;
+  let frontmatterCount = 0;
+  let lastFieldIdx = -1;
+  let replacedIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim() === '---') {
+      frontmatterCount++;
+      inFrontmatter = frontmatterCount === 1;
+      if (frontmatterCount === 2) inFrontmatter = false;
+      continue;
+    }
+    if (inFrontmatter) continue;
+
+    if (INLINE_FIELD_RE.test(line)) {
+      lastFieldIdx = i;
+      const match = line.match(INLINE_FIELD_RE);
+      if (match && match[1]!.trim() === fieldName) {
+        replacedIdx = i;
+      }
+    }
+  }
+
+  if (replacedIdx !== -1) {
+    lines[replacedIdx] = `${fieldName}:: ${newValue}`;
+  } else if (lastFieldIdx !== -1) {
+    lines.splice(lastFieldIdx + 1, 0, `${fieldName}:: ${newValue}`);
+  } else {
+    let insertIdx = lines.length;
+    let fmCount = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i]!.trim() === '---') {
+        fmCount++;
+        if (fmCount === 2) {
+          insertIdx = i + 1;
+          break;
+        }
+      }
+    }
+    lines.splice(insertIdx, 0, `${fieldName}:: ${newValue}`);
+  }
+
+  return lines.join('\n');
+}
+
 async function updateField(
   app: App,
   filePath: string,
@@ -245,54 +315,7 @@ async function updateField(
 
   isUpdatingRef.value = true;
   try {
-    await app.vault.process(file, (data) => {
-      const lines = data.split('\n');
-      let inFrontmatter = false;
-      let frontmatterCount = 0;
-      let lastFieldIdx = -1;
-      let replacedIdx = -1;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]!;
-        if (line.trim() === '---') {
-          frontmatterCount++;
-          inFrontmatter = frontmatterCount === 1;
-          if (frontmatterCount === 2) inFrontmatter = false;
-          continue;
-        }
-        if (inFrontmatter) continue;
-
-        if (INLINE_FIELD_RE.test(line)) {
-          lastFieldIdx = i;
-          const m = line.match(INLINE_FIELD_RE);
-          if (m && m[1]!.trim() === fieldName) {
-            replacedIdx = i;
-          }
-        }
-      }
-
-      if (replacedIdx !== -1) {
-        lines[replacedIdx] = `${fieldName}:: ${newValue}`;
-      } else if (lastFieldIdx !== -1) {
-        lines.splice(lastFieldIdx + 1, 0, `${fieldName}:: ${newValue}`);
-      } else {
-        // No inline fields exist; append after frontmatter or at end
-        let insertIdx = lines.length;
-        let fmCount = 0;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i]!.trim() === '---') {
-            fmCount++;
-            if (fmCount === 2) {
-              insertIdx = i + 1;
-              break;
-            }
-          }
-        }
-        lines.splice(insertIdx, 0, `${fieldName}:: ${newValue}`);
-      }
-
-      return lines.join('\n');
-    });
+    await app.vault.process(file, (data) => upsertInlineField(data, fieldName, newValue));
   } finally {
     isUpdatingRef.value = false;
   }
@@ -306,6 +329,10 @@ function hashString(str: string): number {
     hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseTextCellParts(value: string): TextCellPart[] | null {
@@ -362,16 +389,24 @@ function getDisplayText(value: string): string {
   return links.map((link) => link.label).join(', ');
 }
 
+function serializeConfigValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean).join(', ');
+  }
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
 function getReferencedSources(config: EditableViewConfig): string[] {
   const sources = new Set<string>();
 
   for (const field of config.fields) {
-    if (field.type === 'relation' && field.source) {
+    if ((field.type === 'relation' || field.type === 'relation-multi') && field.source) {
       sources.add(field.source);
     }
     if (field.type === 'lookup' && field.relation) {
       const relationField = config.fields.find((candidate) => candidate.name === field.relation);
-      if (relationField?.type === 'relation' && relationField.source) {
+      if ((relationField?.type === 'relation' || relationField?.type === 'relation-multi') && relationField.source) {
         sources.add(relationField.source);
       }
     }
@@ -419,13 +454,88 @@ class EditableViewRenderer {
 
   /** Update a field value, invalidate cache, and re-render */
   private commitField(filePath: string, fieldName: string, newValue: string, container: HTMLElement): void {
-    updateField(this.app, filePath, fieldName, newValue, this.isUpdatingRef).then(() => {
+    updateField(this.app, filePath, fieldName, newValue, this.isUpdatingRef).then(async () => {
+      this.invalidateCache();
+      await this.preloadRelatedSources(this.config.fields);
+      await this.maybeAutoRenameRecord(filePath);
       this.invalidateCache();
       this.render(container);
     });
   }
 
-  /** Create a new markdown file in the source folder with empty inline fields */
+  private getPersistedFields(): FieldConfig[] {
+    return this.config.fields.filter((field) => field.type !== 'lookup');
+  }
+
+  private getDefaultFieldValue(field: FieldConfig): string {
+    return serializeConfigValue(this.config.defaults[field.name]);
+  }
+
+  private getUniqueFileName(baseName: string): string {
+    const trimmed = baseName.trim() || 'Untitled';
+    let fileName = trimmed;
+    let counter = 1;
+    while (this.app.vault.getAbstractFileByPath(`${this.config.source}/${fileName}.md`)) {
+      fileName = `${trimmed} ${counter}`;
+      counter++;
+    }
+    return fileName;
+  }
+
+  private applyTitlePattern(record: FileRecord): string {
+    if (!this.config.titlePattern) return '';
+
+    return this.config.titlePattern.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, tokenRaw: string) => {
+      const token = tokenRaw.trim();
+      if (!token) return '';
+      if (token.endsWith('.label')) {
+        const fieldName = token.slice(0, -'.label'.length);
+        return this.getDisplayValue(record, fieldName);
+      }
+      if (token.endsWith('.value')) {
+        const fieldName = token.slice(0, -'.value'.length);
+        return record.fields[fieldName] ?? '';
+      }
+      return this.getDisplayValue(record, token);
+    }).trim();
+  }
+
+  private async maybeAutoRenameRecord(filePath: string): Promise<void> {
+    if (!this.config.titlePattern) return;
+
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || !(file instanceof TFile)) return;
+    if (!UNTITLED_FILE_RE.test(file.basename)) return;
+    const oldName = file.basename;
+
+    const content = await this.app.vault.cachedRead(file);
+    const record: FileRecord = {
+      filePath: file.path,
+      fileName: file.basename,
+      fields: parseInlineFields(content),
+      aliases: getFileAliases(this.app, file),
+    };
+    await this.preloadRelatedSources(this.config.fields);
+
+    const nextName = this.applyTitlePattern(record);
+    if (!nextName || nextName === file.basename) return;
+
+    const uniqueName = this.getUniqueFileName(nextName);
+    const newPath = file.path.replace(/[^/]+\.md$/, `${uniqueName}.md`);
+    if (newPath === file.path) return;
+
+    await this.app.vault.rename(file, newPath);
+    const renamedFile = this.app.vault.getAbstractFileByPath(newPath);
+    if (!renamedFile || !(renamedFile instanceof TFile)) return;
+
+    await this.app.vault.process(renamedFile, (data) => {
+      const headingRe = new RegExp(`^(#\\s+)${escapeRegExp(oldName)}(\\s*)$`, 'm');
+      if (!headingRe.test(data)) return data;
+      return data.replace(headingRe, `$1${uniqueName}$2`);
+    });
+  }
+
+  /** Create a new markdown file in the source folder with template/default values */
   private async createNewRecord(container: HTMLElement): Promise<void> {
     const folder = this.app.vault.getAbstractFileByPath(this.config.source);
     if (!folder || !(folder instanceof TFolder)) {
@@ -433,20 +543,30 @@ class EditableViewRenderer {
       return;
     }
 
-    // Generate unique file name
-    const baseName = 'Untitled';
-    let fileName = baseName;
-    let counter = 1;
-    while (this.app.vault.getAbstractFileByPath(`${this.config.source}/${fileName}.md`)) {
-      fileName = `${baseName} ${counter}`;
-      counter++;
+    const baseName = this.config.newFileName ?? 'Untitled';
+    const fileName = this.getUniqueFileName(baseName);
+    const defaults = new Map<string, string>();
+    for (const field of this.getPersistedFields()) {
+      defaults.set(field.name, this.getDefaultFieldValue(field));
     }
 
-    // Build content with empty inline fields for persisted fields only
-    const lines = this.config.fields
-      .filter((f) => f.type !== 'lookup')
-      .map((f) => `${f.name}:: `);
-    const content = lines.join('\n') + '\n';
+    let content = '';
+    if (this.config.template) {
+      const templateFile = this.app.vault.getAbstractFileByPath(this.config.template);
+      if (!templateFile || !(templateFile instanceof TFile)) {
+        new Notice(`editable-view: Template not found: ${this.config.template}`);
+        return;
+      }
+
+      content = await this.app.vault.cachedRead(templateFile);
+      content = content.split('{{title}}').join(fileName);
+      for (const field of this.getPersistedFields()) {
+        content = upsertInlineField(content, field.name, defaults.get(field.name) ?? '');
+      }
+    } else {
+      const lines = this.getPersistedFields().map((field) => `${field.name}:: ${defaults.get(field.name) ?? ''}`);
+      content = lines.join('\n') + '\n';
+    }
 
     const filePath = `${this.config.source}/${fileName}.md`;
     await this.app.vault.create(filePath, content);
@@ -543,12 +663,12 @@ class EditableViewRenderer {
     const sources = new Set<string>();
 
     for (const field of fields) {
-      if (field.type === 'relation' && field.source) {
+      if ((field.type === 'relation' || field.type === 'relation-multi') && field.source) {
         sources.add(field.source);
       }
       if (field.type === 'lookup' && field.relation) {
         const relationField = this.getFieldConfig(field.relation);
-        if (relationField?.type === 'relation' && relationField.source) {
+        if ((relationField?.type === 'relation' || relationField?.type === 'relation-multi') && relationField.source) {
           sources.add(relationField.source);
         }
       }
@@ -568,26 +688,46 @@ class EditableViewRenderer {
     return sourceRecords.find((record) => record.filePath === file.path) ?? null;
   }
 
-  private getRelationLinks(value: string): WikiLinkPart[] {
+  private getRelationLinks(value: string, allowMultiple = false): WikiLinkPart[] {
     const parsedLinks = parseWikiLinks(value);
     if (parsedLinks.length > 0) return parsedLinks;
 
     const trimmed = value.trim();
-    return trimmed ? [{ target: trimmed, label: trimmed }] : [];
+    if (!trimmed) return [];
+    const values = allowMultiple
+      ? trimmed.split(',').map((part) => part.trim()).filter(Boolean)
+      : [trimmed];
+    return values.map((target) => ({ target, label: target }));
+  }
+
+  private getRelationCandidates(field: FieldConfig): FileRecord[] {
+    if (!field.source) return [];
+    return [...(this.sourceRecordCache.get(field.source) ?? [])]
+      .sort((a, b) => a.fileName.localeCompare(b.fileName, 'ko'));
+  }
+
+  private buildRelationListValue(targetRecords: FileRecord[], sourcePath: string): string {
+    return targetRecords.map((targetRecord) => this.buildRelationValue(targetRecord, sourcePath)).join(', ');
   }
 
   private getLookupRawValue(record: FileRecord, field: FieldConfig): string {
     if (!field.relation || !field.field) return '';
 
     const relationField = this.getFieldConfig(field.relation);
-    if (!relationField || relationField.type !== 'relation') return '';
+    if (!relationField || (relationField.type !== 'relation' && relationField.type !== 'relation-multi')) return '';
 
     const relationValue = record.fields[relationField.name] ?? '';
-    const relationLink = this.getRelationLinks(relationValue)[0];
-    if (!relationLink) return '';
+    const relationLinks = this.getRelationLinks(relationValue, relationField.type === 'relation-multi');
+    if (relationLinks.length === 0) return '';
 
-    const relatedRecord = this.resolveRelationRecord(relationLink.target, relationField, record.filePath);
-    return relatedRecord?.fields[field.field] ?? '';
+    const separator = field.separator ?? ', ';
+    const values = relationLinks
+      .map((relationLink) => this.resolveRelationRecord(relationLink.target, relationField, record.filePath))
+      .filter((relatedRecord): relatedRecord is FileRecord => relatedRecord !== null)
+      .map((relatedRecord) => relatedRecord.fields[field.field!] ?? '')
+      .filter(Boolean);
+
+    return values.join(separator);
   }
 
   private getDisplayValue(record: FileRecord, fieldKey: string): string {
@@ -793,6 +933,9 @@ class EditableViewRenderer {
       case 'relation':
         this.renderRelationCell(td, value, field, record, container);
         break;
+      case 'relation-multi':
+        this.renderRelationMultiCell(td, value, field, record, container);
+        break;
       case 'lookup':
         this.renderLookupCell(td, field, record);
         break;
@@ -888,6 +1031,17 @@ class EditableViewRenderer {
     });
   }
 
+  private renderRelationMultiCell(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
+    td.classList.add('ev-td-editable', 'ev-td-relation', 'ev-td-relation-multi');
+    this.renderLinkedTextParts(td, value, record.filePath);
+
+    td.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target instanceof HTMLElement && e.target.closest('a')) return;
+      this.showRelationMultiPicker(td, value, field, record, container);
+    });
+  }
+
   private renderLookupCell(td: HTMLElement, field: FieldConfig, record: FileRecord): void {
     td.classList.add('ev-td-readonly');
     this.renderLinkedTextParts(td, this.getLookupRawValue(record, field), record.filePath);
@@ -911,8 +1065,7 @@ class EditableViewRenderer {
 
     this.closeActivePopup();
 
-    const relationRecords = [...(this.sourceRecordCache.get(field.source) ?? [])]
-      .sort((a, b) => a.fileName.localeCompare(b.fileName, 'ko'));
+    const relationRecords = this.getRelationCandidates(field);
     const selectedPath = this.getRelationLinks(value)[0]
       ? this.resolveRelationRecord(this.getRelationLinks(value)[0]!.target, field, record.filePath)?.filePath ?? null
       : null;
@@ -1031,6 +1184,161 @@ class EditableViewRenderer {
       this.activePopupHandler = (ev: MouseEvent) => {
         if (!popup.contains(ev.target as Node)) {
           this.closeActivePopup();
+        }
+      };
+      document.addEventListener('click', this.activePopupHandler);
+    }, 0);
+  }
+
+  private showRelationMultiPicker(td: HTMLElement, value: string, field: FieldConfig, record: FileRecord, container: HTMLElement): void {
+    if (!field.source) {
+      new Notice(`editable-view: "${field.name}" is missing relation source`);
+      return;
+    }
+
+    this.closeActivePopup();
+
+    const relationRecords = this.getRelationCandidates(field);
+    const selectedPaths = new Set(
+      this.getRelationLinks(value, true)
+        .map((link) => this.resolveRelationRecord(link.target, field, record.filePath)?.filePath ?? null)
+        .filter((filePath): filePath is string => filePath !== null),
+    );
+
+    const popup = document.createElement('div');
+    popup.className = 'ev-dropdown-popup ev-relation-popup';
+    this.activePopup = popup;
+
+    const searchInput = document.createElement('input');
+    searchInput.className = 'ev-relation-search';
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search notes...';
+    popup.appendChild(searchInput);
+
+    const list = document.createElement('div');
+    list.className = 'ev-relation-list';
+    popup.appendChild(list);
+
+    let activeIndex = 0;
+
+    const getFiltered = () => {
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) return relationRecords;
+
+      return relationRecords.filter((candidate) => {
+        const haystack = [candidate.fileName, ...candidate.aliases].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    };
+
+    const commitSelection = () => {
+      const selectedRecords = relationRecords.filter((candidate) => selectedPaths.has(candidate.filePath));
+      const newValue = this.buildRelationListValue(selectedRecords, record.filePath);
+      if (newValue !== value) {
+        this.commitField(record.filePath, field.name, newValue, container);
+      }
+    };
+
+    const toggleRecord = (targetRecord: FileRecord) => {
+      if (selectedPaths.has(targetRecord.filePath)) {
+        selectedPaths.delete(targetRecord.filePath);
+      } else {
+        selectedPaths.add(targetRecord.filePath);
+      }
+      renderList();
+    };
+
+    const renderList = () => {
+      const filtered = getFiltered();
+      if (activeIndex >= filtered.length) activeIndex = Math.max(filtered.length - 1, 0);
+
+      list.empty();
+      if (filtered.length === 0) {
+        list.createDiv({ cls: 'ev-relation-empty', text: 'No matches' });
+        return;
+      }
+
+      filtered.forEach((candidate, index) => {
+        const item = list.createEl('label', { cls: 'ev-dropdown-multi-item ev-relation-item' });
+        if (selectedPaths.has(candidate.filePath)) item.addClass('is-selected');
+        if (index === activeIndex) item.addClass('is-active');
+
+        const checkbox = item.createEl('input', { type: 'checkbox' });
+        checkbox.checked = selectedPaths.has(candidate.filePath);
+        checkbox.addEventListener('change', () => {
+          toggleRecord(candidate);
+        });
+
+        const content = item.createDiv({ cls: 'ev-relation-item-content' });
+        content.createDiv({ cls: 'ev-relation-item-main', text: candidate.fileName });
+        if (candidate.aliases.length > 0) {
+          content.createDiv({ cls: 'ev-relation-item-meta', text: candidate.aliases.join(', ') });
+        }
+
+        item.addEventListener('mouseenter', () => {
+          activeIndex = index;
+          renderList();
+        });
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (e.target instanceof HTMLInputElement) return;
+          toggleRecord(candidate);
+        });
+      });
+    };
+
+    searchInput.addEventListener('input', () => {
+      activeIndex = 0;
+      renderList();
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      const filtered = getFiltered();
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (filtered.length > 0) activeIndex = Math.min(activeIndex + 1, filtered.length - 1);
+        renderList();
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (filtered.length > 0) activeIndex = Math.max(activeIndex - 1, 0);
+        renderList();
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const targetRecord = filtered[activeIndex];
+        if (targetRecord) toggleRecord(targetRecord);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeActivePopup();
+        commitSelection();
+      }
+    });
+
+    const clearItem = document.createElement('div');
+    clearItem.className = 'ev-dropdown-item ev-dropdown-clear';
+    clearItem.textContent = '비우기';
+    clearItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedPaths.clear();
+      this.closeActivePopup();
+      if (value) {
+        this.commitField(record.filePath, field.name, '', container);
+      }
+    });
+    popup.appendChild(clearItem);
+
+    renderList();
+    document.body.appendChild(popup);
+    this.positionPopup(popup, td);
+    searchInput.focus();
+
+    setTimeout(() => {
+      this.activePopupHandler = (ev: MouseEvent) => {
+        if (!popup.contains(ev.target as Node)) {
+          this.closeActivePopup();
+          commitSelection();
         }
       };
       document.addEventListener('click', this.activePopupHandler);

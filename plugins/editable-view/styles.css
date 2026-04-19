@@ -391,6 +391,10 @@
   font-size: var(--font-text-size);
 }
 
+.ev-relation-item-content {
+  min-width: 0;
+}
+
 .ev-relation-item-meta {
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
