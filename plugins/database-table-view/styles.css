@@ -858,10 +858,11 @@
   height: 28px;
   margin: 0 auto;
   padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  outline: none !important;
   cursor: pointer;
   color: var(--text-muted);
   opacity: 0.44;
@@ -907,17 +908,27 @@
 .dtv-delete-button:hover {
   opacity: 1;
   color: var(--text-error);
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .dtv-delete-button:active {
   opacity: 1;
   color: var(--text-error);
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .dtv-delete-button:focus,
 .dtv-delete-button:focus-visible {
-  outline: none;
-  box-shadow: none;
+  background: none !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .dtv-delete-button:focus-visible {
