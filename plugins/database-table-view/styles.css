@@ -109,6 +109,10 @@
   background: var(--background-modifier-hover);
 }
 
+.dtv-cell-placeholder {
+  min-height: 18px;
+}
+
 .dtv-cell-checkbox {
   width: 16px;
   height: 16px;
@@ -264,6 +268,107 @@
   border-radius: 8px;
   padding: 6px 8px;
   font: inherit;
+}
+
+.dtv-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dtv-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(var(--dtv-tag-hue) 60% 88% / 0.75);
+  color: hsl(var(--dtv-tag-hue) 35% 24%);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.theme-dark .dtv-tag {
+  background: hsl(var(--dtv-tag-hue) 40% 28% / 0.8);
+  color: hsl(var(--dtv-tag-hue) 70% 88%);
+}
+
+.dtv-picker {
+  position: fixed;
+  min-width: 260px;
+  max-width: min(360px, 90vw);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-s, 0 10px 30px rgba(0, 0, 0, 0.16));
+  padding: 8px;
+  z-index: var(--layer-popover, 100);
+}
+
+.dtv-picker-input {
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.dtv-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.dtv-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dtv-picker-item:hover,
+.dtv-picker-item.is-active {
+  background: var(--background-modifier-hover);
+}
+
+.dtv-picker-item.is-selected .dtv-picker-item-label {
+  color: var(--interactive-accent);
+}
+
+.dtv-picker-item-content {
+  min-width: 0;
+}
+
+.dtv-picker-item-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dtv-picker-item-meta,
+.dtv-picker-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.dtv-picker-clear {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dtv-picker-clear:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .dtv-actions-header,

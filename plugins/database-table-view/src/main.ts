@@ -44,10 +44,29 @@ import {
 
 const VIEW_TYPE = 'database-table-view';
 const REFRESH_DEBOUNCE_MS = 250;
+const WIKILINK_RE = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/;
 
 interface DraftRowState {
   key: string;
   name: string;
+}
+
+interface PickerEntry {
+  id: string;
+  label: string;
+  meta?: string;
+  selected: boolean;
+  create?: boolean;
+}
+
+interface SearchPickerConfig {
+  mode: 'single' | 'multiple';
+  placeholder: string;
+  initialQuery?: string;
+  initialSelectedIds: string[];
+  allowClear: boolean;
+  buildEntries: (query: string, selectedIds: Set<string>) => PickerEntry[];
+  onCommit: (selectedIds: string[]) => Promise<void>;
 }
 
 function getColumnTypeLabel(type: ColumnType): string {
@@ -65,6 +84,14 @@ function getColumnTypeLabel(type: ColumnType): string {
     default:
       return type;
   }
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
 }
 
 class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
@@ -100,6 +127,17 @@ class DatabaseTableView extends ItemView {
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private isRendering = false;
   private pendingRender = false;
+  private activePicker: HTMLElement | null = null;
+  private activePickerHandler: ((event: MouseEvent) => void) | null = null;
+  private columnFormState: {
+    name: string;
+    type: ColumnType;
+    relationFolder: string;
+  } = {
+      name: '',
+      type: 'text',
+      relationFolder: '',
+    };
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -126,6 +164,7 @@ class DatabaseTableView extends ItemView {
 
   async onClose(): Promise<void> {
     if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
+    this.closeActivePicker();
   }
 
   getState(): Record<string, unknown> {
@@ -166,8 +205,17 @@ class DatabaseTableView extends ItemView {
   private watchesPath(path: string): boolean {
     const definition = this.getCurrentDefinition();
     if (!definition) return false;
-    const folder = definition.table.sourceFolder;
-    return path === folder || path.startsWith(`${folder}/`);
+
+    const watchedFolders = new Set<string>([definition.table.sourceFolder]);
+    for (const column of definition.table.columns) {
+      if (column.type !== 'relation' || !column.relation) continue;
+      const targetTable = this.plugin.data.tables[column.relation.tableId];
+      if (targetTable) {
+        watchedFolders.add(targetTable.sourceFolder);
+      }
+    }
+
+    return [...watchedFolders].some((folder) => path === folder || path.startsWith(`${folder}/`));
   }
 
   async handleVaultChange(path: string): Promise<void> {
@@ -177,6 +225,215 @@ class DatabaseTableView extends ItemView {
 
   private async persistPluginData(): Promise<void> {
     await this.plugin.savePluginData();
+  }
+
+  private closeActivePicker(): void {
+    if (this.activePicker) {
+      this.activePicker.remove();
+      this.activePicker = null;
+    }
+    if (this.activePickerHandler) {
+      document.removeEventListener('click', this.activePickerHandler);
+      this.activePickerHandler = null;
+    }
+  }
+
+  private positionPicker(popup: HTMLElement, anchor: HTMLElement): void {
+    const rect = anchor.getBoundingClientRect();
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.left = `${rect.left}px`;
+
+    requestAnimationFrame(() => {
+      const popupRect = popup.getBoundingClientRect();
+      if (popupRect.right > window.innerWidth - 8) {
+        popup.style.left = `${Math.max(8, window.innerWidth - popupRect.width - 8)}px`;
+      }
+      if (popupRect.bottom > window.innerHeight - 8) {
+        popup.style.top = `${Math.max(8, rect.top - popupRect.height - 4)}px`;
+      }
+    });
+  }
+
+  private isPickerEvent(event: MouseEvent, popup: HTMLElement): boolean {
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    if (path.length > 0) {
+      return path.includes(popup);
+    }
+    return popup.contains(event.target as Node);
+  }
+
+  private openSearchPicker(anchor: HTMLElement, config: SearchPickerConfig): void {
+    this.closeActivePicker();
+
+    const popup = document.createElement('div');
+    popup.className = 'dtv-picker';
+    this.activePicker = popup;
+
+    const input = document.createElement('input');
+    input.className = 'dtv-picker-input';
+    input.type = 'text';
+    input.placeholder = config.placeholder;
+    input.value = config.initialQuery ?? '';
+    popup.appendChild(input);
+
+    const list = document.createElement('div');
+    list.className = 'dtv-picker-list';
+    popup.appendChild(list);
+
+    const selectedIds = new Set(config.initialSelectedIds);
+    let activeIndex = 0;
+
+    const getEntries = (): PickerEntry[] => {
+      return config.buildEntries(input.value, selectedIds);
+    };
+
+    const renderEntries = (): void => {
+      const entries = getEntries();
+      if (activeIndex >= entries.length) {
+        activeIndex = Math.max(0, entries.length - 1);
+      }
+
+      list.empty();
+      if (entries.length === 0) {
+        list.createDiv({ cls: 'dtv-picker-empty', text: 'No matches' });
+        return;
+      }
+
+      entries.forEach((entry, index) => {
+        const item = list.createDiv({ cls: 'dtv-picker-item' });
+        if (entry.selected) item.addClass('is-selected');
+        if (index === activeIndex) item.addClass('is-active');
+
+        if (config.mode === 'multiple') {
+          const checkbox = item.createEl('input', { type: 'checkbox' });
+          checkbox.checked = entry.selected;
+          checkbox.addEventListener('click', (event) => {
+            event.stopPropagation();
+          });
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+              selectedIds.add(entry.id);
+            } else {
+              selectedIds.delete(entry.id);
+            }
+            renderEntries();
+          });
+        }
+
+        const content = item.createDiv({ cls: 'dtv-picker-item-content' });
+        content.createDiv({ cls: 'dtv-picker-item-label', text: entry.label });
+        if (entry.meta) {
+          content.createDiv({ cls: 'dtv-picker-item-meta', text: entry.meta });
+        }
+
+        item.addEventListener('mouseenter', () => {
+          activeIndex = index;
+        });
+        item.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          if (config.mode === 'single') {
+            this.closeActivePicker();
+            await config.onCommit([entry.id]);
+            return;
+          }
+
+          if (selectedIds.has(entry.id)) {
+            selectedIds.delete(entry.id);
+          } else {
+            selectedIds.add(entry.id);
+          }
+          renderEntries();
+        });
+      });
+    };
+
+    const commitAndClose = async (): Promise<void> => {
+      this.closeActivePicker();
+      await config.onCommit([...selectedIds]);
+    };
+
+    input.addEventListener('input', () => {
+      activeIndex = 0;
+      renderEntries();
+    });
+    input.addEventListener('keydown', (event) => {
+      const entries = getEntries();
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        if (entries.length > 0) {
+          activeIndex = Math.min(activeIndex + 1, entries.length - 1);
+        }
+        renderEntries();
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (entries.length > 0) {
+          activeIndex = Math.max(activeIndex - 1, 0);
+        }
+        renderEntries();
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const entry = entries[activeIndex];
+        if (!entry) return;
+
+        if (config.mode === 'single') {
+          this.closeActivePicker();
+          void config.onCommit([entry.id]);
+          return;
+        }
+
+        if (selectedIds.has(entry.id)) {
+          selectedIds.delete(entry.id);
+        } else {
+          selectedIds.add(entry.id);
+        }
+        renderEntries();
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (config.mode === 'multiple') {
+          void commitAndClose();
+        } else {
+          this.closeActivePicker();
+        }
+      }
+    });
+
+    if (config.allowClear) {
+      const clear = document.createElement('div');
+      clear.className = 'dtv-picker-clear';
+      clear.textContent = 'Clear';
+      clear.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        selectedIds.clear();
+        await commitAndClose();
+      });
+      popup.appendChild(clear);
+    }
+
+    renderEntries();
+    document.body.appendChild(popup);
+    this.positionPicker(popup, anchor);
+    input.focus();
+    input.select();
+
+    setTimeout(() => {
+      this.activePickerHandler = (event: MouseEvent) => {
+        if (!this.activePicker || !this.isPickerEvent(event, popup)) {
+          if (config.mode === 'multiple') {
+            void commitAndClose();
+          } else {
+            this.closeActivePicker();
+          }
+        }
+      };
+      document.addEventListener('click', this.activePickerHandler);
+    }, 0);
   }
 
   private async render(): Promise<void> {
@@ -198,6 +455,8 @@ class DatabaseTableView extends ItemView {
   }
 
   private async renderInternal(): Promise<void> {
+    this.closeActivePicker();
+
     const container = this.contentEl;
     container.empty();
     container.addClass('dtv-view');
@@ -395,30 +654,70 @@ class DatabaseTableView extends ItemView {
     const nameInput = form.createEl('input', {
       cls: 'dtv-column-form-input',
       type: 'text',
+      value: this.columnFormState.name,
       attr: { placeholder: 'Column name' },
     });
+    nameInput.addEventListener('input', () => {
+      this.columnFormState.name = nameInput.value;
+    });
+
     const typeSelect = form.createEl('select', { cls: 'dtv-column-form-select' });
-    for (const type of ['text', 'checkbox'] as const) {
-      typeSelect.createEl('option', {
+    for (const type of ['text', 'checkbox', 'single-select', 'multi-select', 'relation'] as const) {
+      const option = typeSelect.createEl('option', {
         value: type,
         text: getColumnTypeLabel(type),
       });
+      option.selected = type === this.columnFormState.type;
     }
+    typeSelect.addEventListener('change', () => {
+      this.columnFormState.type = typeSelect.value as ColumnType;
+      this.renderColumnManagerPanel(panel, table, view);
+    });
+
+    if (this.columnFormState.type === 'relation') {
+      const relationButton = form.createEl('button', {
+        cls: 'dtv-folder-button',
+        text: this.columnFormState.relationFolder || 'Choose relation folder',
+      });
+      relationButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        new FolderSuggestModal(this.app, (folder) => {
+          this.columnFormState.relationFolder = folder.path;
+          this.renderColumnManagerPanel(panel, table, view);
+        }).open();
+      });
+    }
+
     const addButton = form.createEl('button', { cls: 'dtv-action-button', text: 'Add column' });
     addButton.addEventListener('click', async () => {
+      let relationTableId: string | null = null;
+      if (this.columnFormState.type === 'relation') {
+        if (!this.columnFormState.relationFolder) {
+          new Notice('Choose a relation folder');
+          return;
+        }
+        relationTableId = ensureTableForFolder(this.plugin.data, this.columnFormState.relationFolder).table.id;
+      }
+
       const result = addColumn(table, view, {
-        name: nameInput.value,
-        type: typeSelect.value as ColumnType,
+        name: this.columnFormState.name,
+        type: this.columnFormState.type,
+        relationTableId,
       });
       if (result.status === 'invalid') {
         new Notice('Column name is invalid');
         return;
       }
       if (result.status === 'conflict') {
-        new Notice(`A column named "${nameInput.value.trim()}" already exists`);
+        new Notice(`A column named "${this.columnFormState.name.trim()}" already exists`);
         return;
       }
-      nameInput.value = '';
+
+      this.columnFormState = {
+        name: '',
+        type: 'text',
+        relationFolder: '',
+      };
       await this.persistPluginData();
       await this.render();
     });
@@ -504,22 +803,240 @@ class DatabaseTableView extends ItemView {
   }
 
   private renderCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
-    if (column.type === 'checkbox') {
-      const checkbox = cell.createEl('input', { type: 'checkbox', cls: 'dtv-cell-checkbox' });
-      checkbox.checked = row.values[column.id] === true;
-      checkbox.addEventListener('change', async () => {
-        await updateColumnValue(this.app, row, column, checkbox.checked);
-        this.requestRefresh();
-      });
-      return;
+    switch (column.type) {
+      case 'checkbox':
+        this.renderCheckboxCell(cell, row, column);
+        return;
+      case 'single-select':
+        this.renderSingleSelectCell(cell, row, column);
+        return;
+      case 'multi-select':
+        this.renderMultiSelectCell(cell, row, column);
+        return;
+      case 'relation':
+        this.renderRelationCell(cell, row, column);
+        return;
+      case 'text':
+      default:
+        this.renderTextCell(cell, row, column);
     }
+  }
 
+  private renderCheckboxCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    const checkbox = cell.createEl('input', { type: 'checkbox', cls: 'dtv-cell-checkbox' });
+    checkbox.checked = row.values[column.id] === true;
+    checkbox.addEventListener('change', async () => {
+      await updateColumnValue(this.app, row, column, checkbox.checked);
+      this.requestRefresh();
+    });
+  }
+
+  private renderTextCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
     const value = this.getCellTextValue(row, column);
     cell.addClass('dtv-cell-editable');
     cell.setText(value);
     cell.addEventListener('click', () => {
       if (cell.querySelector('input')) return;
       this.editTextCell(cell, row, column, value);
+    });
+  }
+
+  private renderSingleSelectCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    cell.addClass('dtv-cell-editable');
+    const value = this.getCellTextValue(row, column);
+    this.renderTagList(cell, value ? [value] : []);
+    cell.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.showSingleSelectPicker(cell, row, column);
+    });
+  }
+
+  private renderMultiSelectCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    cell.addClass('dtv-cell-editable');
+    const values = Array.isArray(row.values[column.id])
+      ? (row.values[column.id] as string[])
+      : [];
+    this.renderTagList(cell, values);
+    cell.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.showMultiSelectPicker(cell, row, column);
+    });
+  }
+
+  private renderRelationCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    cell.addClass('dtv-cell-editable');
+
+    const resolved = this.resolveRelationRow(row, column);
+    if (resolved) {
+      const link = cell.createEl('a', {
+        cls: 'dtv-name-link internal-link',
+        text: resolved.name,
+      });
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.app.workspace.openLinkText(resolved.filePath, row.filePath);
+      });
+    } else {
+      cell.setText(this.getCellTextValue(row, column));
+    }
+
+    cell.addEventListener('click', (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest('a')) return;
+      event.stopPropagation();
+      void this.showRelationPicker(cell, row, column);
+    });
+  }
+
+  private renderTagList(cell: HTMLElement, values: string[]): void {
+    cell.empty();
+    if (values.length === 0) {
+      cell.createDiv({ cls: 'dtv-cell-placeholder', text: '' });
+      return;
+    }
+
+    const list = cell.createDiv({ cls: 'dtv-tag-list' });
+    for (const value of values) {
+      const tag = list.createSpan({ cls: 'dtv-tag', text: value });
+      tag.style.setProperty('--dtv-tag-hue', String(hashString(value) % 360));
+    }
+  }
+
+  private showSingleSelectPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    const currentValue = this.getCellTextValue(row, column);
+    this.openSearchPicker(anchor, {
+      mode: 'single',
+      placeholder: 'Search or create an option...',
+      initialQuery: currentValue,
+      initialSelectedIds: currentValue ? [currentValue] : [],
+      allowClear: true,
+      buildEntries: (query) => {
+        const normalizedQuery = query.trim().toLowerCase();
+        const options = column.options.filter((option) => option.toLowerCase().includes(normalizedQuery));
+        const entries: PickerEntry[] = options.map((option) => ({
+          id: option,
+          label: option,
+          selected: option === currentValue,
+        }));
+        const trimmed = query.trim();
+        if (trimmed && !column.options.some((option) => option === trimmed)) {
+          entries.unshift({
+            id: trimmed,
+            label: trimmed,
+            meta: 'Create option',
+            selected: false,
+            create: true,
+          });
+        }
+        return entries;
+      },
+      onCommit: async (selectedIds) => {
+        const nextValue = selectedIds[0] ?? '';
+        if (nextValue && !column.options.includes(nextValue)) {
+          column.options.push(nextValue);
+          await this.persistPluginData();
+        }
+        await updateColumnValue(this.app, row, column, nextValue);
+        this.requestRefresh();
+      },
+    });
+  }
+
+  private showMultiSelectPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    const currentValues = Array.isArray(row.values[column.id])
+      ? (row.values[column.id] as string[])
+      : [];
+    this.openSearchPicker(anchor, {
+      mode: 'multiple',
+      placeholder: 'Search or create options...',
+      initialSelectedIds: currentValues,
+      allowClear: true,
+      buildEntries: (query, selectedIds) => {
+        const normalizedQuery = query.trim().toLowerCase();
+        const knownOptions = new Set([...column.options, ...selectedIds]);
+        const options = [...knownOptions].filter((option) => option.toLowerCase().includes(normalizedQuery));
+        const entries: PickerEntry[] = options.map((option) => ({
+          id: option,
+          label: option,
+          selected: selectedIds.has(option),
+        }));
+        const trimmed = query.trim();
+        if (trimmed && !knownOptions.has(trimmed)) {
+          entries.unshift({
+            id: trimmed,
+            label: trimmed,
+            meta: 'Create option',
+            selected: false,
+            create: true,
+          });
+        }
+        return entries;
+      },
+      onCommit: async (selectedIds) => {
+        let optionsChanged = false;
+        for (const value of selectedIds) {
+          if (!column.options.includes(value)) {
+            column.options.push(value);
+            optionsChanged = true;
+          }
+        }
+        if (optionsChanged) {
+          await this.persistPluginData();
+        }
+        await updateColumnValue(this.app, row, column, selectedIds);
+        this.requestRefresh();
+      },
+    });
+  }
+
+  private async showRelationPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): Promise<void> {
+    if (!column.relation) {
+      new Notice(`"${column.name}" is missing a relation target`);
+      return;
+    }
+
+    const targetTable = this.plugin.data.tables[column.relation.tableId];
+    if (!targetTable) {
+      new Notice(`"${column.name}" relation target is unavailable`);
+      return;
+    }
+
+    const targetRows = await loadRows(this.app, targetTable);
+    const currentRelation = this.resolveRelationRow(row, column);
+    this.openSearchPicker(anchor, {
+      mode: 'single',
+      placeholder: 'Search related rows...',
+      initialSelectedIds: currentRelation ? [currentRelation.filePath] : [],
+      allowClear: true,
+      buildEntries: (query) => {
+        const normalizedQuery = query.trim().toLowerCase();
+        return targetRows
+          .filter((candidate) => candidate.name.toLowerCase().includes(normalizedQuery))
+          .map((candidate) => ({
+            id: candidate.filePath,
+            label: candidate.name,
+            meta: targetTable.sourceFolder,
+            selected: currentRelation?.filePath === candidate.filePath,
+          }));
+      },
+      onCommit: async (selectedIds) => {
+        const selectedId = selectedIds[0];
+        if (!selectedId) {
+          await updateColumnValue(this.app, row, column, '');
+          this.requestRefresh();
+          return;
+        }
+
+        const targetRow = targetRows.find((candidate) => candidate.filePath === selectedId);
+        if (!targetRow) return;
+
+        const linkText = this.app.metadataCache.fileToLinktext(targetRow.file, row.filePath, true);
+        const relationValue = linkText === targetRow.name
+          ? `[[${linkText}]]`
+          : `[[${linkText}|${targetRow.name}]]`;
+        await updateColumnValue(this.app, row, column, relationValue);
+        this.requestRefresh();
+      },
     });
   }
 
@@ -682,12 +1199,46 @@ class DatabaseTableView extends ItemView {
   }
 
   private getCellTextValue(row: RowRecord, column: ColumnSchema): string {
+    if (column.type === 'relation') {
+      const resolved = this.resolveRelationRow(row, column);
+      return resolved?.name ?? this.extractRelationLabel(row.values[column.id]);
+    }
+
     const rawValue = row.values[column.id];
     if (Array.isArray(rawValue)) {
       return rawValue.map((value) => String(value)).join(', ');
     }
     if (rawValue === null || rawValue === undefined) return '';
     return String(rawValue);
+  }
+
+  private extractRelationLabel(rawValue: unknown): string {
+    if (typeof rawValue !== 'string') return '';
+    const trimmed = rawValue.trim();
+    const match = trimmed.match(WIKILINK_RE);
+    if (!match) return trimmed;
+    return match[2] ?? match[1] ?? '';
+  }
+
+  private resolveRelationRow(row: RowRecord, column: ColumnSchema): RowRecord | null {
+    if (!column.relation) return null;
+    const targetTable = this.plugin.data.tables[column.relation.tableId];
+    if (!targetTable) return null;
+
+    const rawValue = row.values[column.id];
+    if (typeof rawValue !== 'string' || !rawValue.trim()) return null;
+
+    const match = rawValue.trim().match(WIKILINK_RE);
+    const linkTarget = match?.[1] ?? rawValue.trim();
+    const file = this.app.metadataCache.getFirstLinkpathDest(linkTarget, row.filePath);
+    if (!file || !file.path.startsWith(`${targetTable.sourceFolder}/`)) return null;
+
+    return {
+      file,
+      filePath: file.path,
+      name: file.basename,
+      values: {},
+    };
   }
 
   private sortRows(rows: RowRecord[], sort: SortState | null, table: TableSchema): RowRecord[] {

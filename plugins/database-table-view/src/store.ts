@@ -298,10 +298,14 @@ export function addColumn(
   input: {
     name: string;
     type: ColumnType;
+    relationTableId?: string | null;
   },
 ): { status: 'added' | 'restored' | 'invalid' | 'conflict'; column?: ColumnSchema } {
   const nextName = normalizeColumnName(input.name);
   if (!nextName || matchesColumnName(nextName, 'Name')) {
+    return { status: 'invalid' };
+  }
+  if (input.type === 'relation' && !input.relationTableId) {
     return { status: 'invalid' };
   }
 
@@ -321,7 +325,9 @@ export function addColumn(
     type: input.type,
     hidden: false,
     options: [],
-    relation: null,
+    relation: input.type === 'relation' && input.relationTableId
+      ? { tableId: input.relationTableId, displayField: 'name' }
+      : null,
   };
   table.columns.push(column);
   syncViewColumnOrder(table, view);
