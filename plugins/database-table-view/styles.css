@@ -1,7 +1,7 @@
 .dtv-view {
   --dtv-name-col-width: 280px;
   --dtv-data-col-width: 190px;
-  --dtv-actions-col-width: 58px;
+  --dtv-actions-col-width: 36px;
   --dtv-outline: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --dtv-outline-strong: color-mix(in srgb, var(--background-modifier-border) 92%, black 8%);
   --dtv-surface: color-mix(in srgb, var(--background-primary) 86%, white 14%);
@@ -167,8 +167,7 @@
 .dtv-folder-button,
 .dtv-action-button,
 .dtv-add-row-button,
-.dtv-empty-button,
-.dtv-delete-button {
+.dtv-empty-button {
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid var(--dtv-outline-strong);
@@ -204,19 +203,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dtv-delete-button {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 50%;
-  color: var(--text-muted);
-}
-
-.dtv-delete-button:hover {
-  border-color: var(--text-error);
-  color: var(--text-error);
 }
 
 .dtv-folder-meta {
@@ -708,7 +694,53 @@
 .dtv-actions-header,
 .dtv-actions-cell {
   width: var(--dtv-actions-col-width);
+  min-width: var(--dtv-actions-col-width);
+  max-width: var(--dtv-actions-col-width);
+  padding-left: 0;
+  padding-right: 0;
   text-align: center;
+}
+
+.dtv-actions-header {
+  background: color-mix(in srgb, var(--dtv-surface-elevated) 90%, white 10%);
+}
+
+.theme-dark .dtv-actions-header {
+  background: color-mix(in srgb, var(--dtv-surface-elevated) 90%, black 10%);
+}
+
+.dtv-actions-cell {
+  position: relative;
+}
+
+.dtv-delete-button {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 100%;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.dtv-delete-button:hover {
+  background: color-mix(in srgb, var(--text-error) 14%, transparent);
+  color: var(--text-error);
+}
+
+.theme-dark .dtv-delete-button:hover {
+  background: color-mix(in srgb, var(--text-error) 20%, transparent);
 }
 
 @media (max-width: 720px) {
