@@ -1,4 +1,7 @@
 .dtv-view {
+  --dtv-name-col-width: 280px;
+  --dtv-data-col-width: 190px;
+  --dtv-actions-col-width: 58px;
   --dtv-outline: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --dtv-outline-strong: color-mix(in srgb, var(--background-modifier-border) 92%, black 8%);
   --dtv-surface: color-mix(in srgb, var(--background-primary) 86%, white 14%);
@@ -263,17 +266,32 @@
 
 .dtv-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   min-width: 700px;
 }
 
+.dtv-col-name {
+  width: var(--dtv-name-col-width);
+}
+
+.dtv-col-data {
+  width: var(--dtv-data-col-width);
+}
+
+.dtv-col-actions {
+  width: var(--dtv-actions-col-width);
+}
+
 .dtv-table th,
 .dtv-table td {
+  box-sizing: border-box;
   padding: 12px 14px;
   border-bottom: 1px solid var(--dtv-outline);
   text-align: left;
   vertical-align: middle;
+  overflow: hidden;
 }
 
 .dtv-table th {
@@ -430,7 +448,6 @@
 }
 
 .dtv-name-cell {
-  min-width: 250px;
   font-weight: 600;
 }
 
@@ -447,6 +464,8 @@
 
 .dtv-cell-input {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--dtv-outline-strong);
   background: color-mix(in srgb, var(--background-primary) 94%, white 6%);
   color: var(--text-normal);
@@ -688,7 +707,7 @@
 
 .dtv-actions-header,
 .dtv-actions-cell {
-  width: 58px;
+  width: var(--dtv-actions-col-width);
   text-align: center;
 }
 

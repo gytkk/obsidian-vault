@@ -501,6 +501,13 @@ class DatabaseTableView extends ItemView {
 
     const wrapper = shell.createDiv({ cls: 'dtv-table-wrapper' });
     const tableEl = wrapper.createEl('table', { cls: 'dtv-table' });
+    const colgroup = tableEl.createEl('colgroup');
+    colgroup.createEl('col', { cls: 'dtv-col dtv-col-name' });
+    for (const _column of visibleColumns) {
+      colgroup.createEl('col', { cls: 'dtv-col dtv-col-data' });
+    }
+    colgroup.createEl('col', { cls: 'dtv-col dtv-col-actions' });
+
     const thead = tableEl.createEl('thead');
     const headerRow = thead.createEl('tr');
     const nameHeader = headerRow.createEl('th');
