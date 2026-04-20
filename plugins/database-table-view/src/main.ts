@@ -57,6 +57,7 @@ interface PickerEntry {
   meta?: string;
   selected: boolean;
   create?: boolean;
+  clear?: boolean;
 }
 
 interface SearchPickerConfig {
@@ -129,6 +130,7 @@ class DatabaseTableView extends ItemView {
   private pendingRender = false;
   private activePicker: HTMLElement | null = null;
   private activePickerHandler: ((event: MouseEvent) => void) | null = null;
+  private activePickerCleanup: (() => void) | null = null;
   private columnFormState: {
     name: string;
     type: ColumnType;
@@ -228,6 +230,10 @@ class DatabaseTableView extends ItemView {
   }
 
   private closeActivePicker(): void {
+    if (this.activePickerCleanup) {
+      this.activePickerCleanup();
+      this.activePickerCleanup = null;
+    }
     if (this.activePicker) {
       this.activePicker.remove();
       this.activePicker = null;
@@ -257,49 +263,56 @@ class DatabaseTableView extends ItemView {
     });
   }
 
-  private isPickerEvent(event: MouseEvent, popup: HTMLElement): boolean {
+  private isPickerEvent(event: MouseEvent, popup: HTMLElement, scopeElements: HTMLElement[] = []): boolean {
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
     if (path.length > 0) {
-      return path.includes(popup);
+      return path.includes(popup) || scopeElements.some((element) => path.includes(element));
     }
-    return popup.contains(event.target as Node);
+    const target = event.target as Node;
+    return popup.contains(target) || scopeElements.some((element) => element.contains(target));
   }
 
-  private openSearchPicker(anchor: HTMLElement, config: SearchPickerConfig): void {
+  private createComboboxEditor(cell: HTMLElement, mode: SearchPickerConfig['mode'], placeholder: string, initialValue: string): {
+    editor: HTMLElement;
+    input: HTMLInputElement;
+    selectionHost: HTMLElement | null;
+  } {
+    cell.empty();
+    cell.addClass('dtv-cell-editing');
+
+    const editor = cell.createDiv({ cls: 'dtv-combobox-editor' });
+    let selectionHost: HTMLElement | null = null;
+
+    if (mode === 'multiple') {
+      selectionHost = editor.createDiv({ cls: 'dtv-combobox-selection' });
+    }
+
+    const input = editor.createEl('input', {
+      cls: 'dtv-combobox-input',
+      type: 'text',
+      value: initialValue,
+      attr: { placeholder },
+    });
+
+    return { editor, input, selectionHost };
+  }
+
+  private openSearchPicker(
+    anchor: HTMLElement,
+    input: HTMLInputElement,
+    selectionHost: HTMLElement | null,
+    config: SearchPickerConfig,
+    onCancel: () => void,
+  ): void {
     this.closeActivePicker();
 
     const popup = document.createElement('div');
-    popup.className = `dtv-picker dtv-picker--${config.mode}`;
+    popup.className = 'dtv-picker';
     this.activePicker = popup;
-    popup.setAttribute('data-mode', config.mode);
-
-    const header = document.createElement('div');
-    header.className = 'dtv-picker-header';
-    popup.appendChild(header);
-
-    const inputShell = document.createElement('div');
-    inputShell.className = 'dtv-picker-input-shell';
-    header.appendChild(inputShell);
-
-    const input = document.createElement('input');
-    input.className = 'dtv-picker-input';
-    input.type = 'text';
-    input.placeholder = config.placeholder;
-    input.value = config.initialQuery ?? '';
     input.setAttribute('role', 'combobox');
     input.setAttribute('aria-expanded', 'true');
     input.setAttribute('aria-autocomplete', 'list');
-    inputShell.appendChild(input);
-
-    const inlineClear = document.createElement('button');
-    inlineClear.className = 'dtv-picker-inline-clear';
-    inlineClear.type = 'button';
-    inlineClear.textContent = 'Clear';
-    inputShell.appendChild(inlineClear);
-
-    const selection = document.createElement('div');
-    selection.className = 'dtv-picker-selection';
-    popup.appendChild(selection);
+    input.value = config.initialQuery ?? input.value;
 
     const list = document.createElement('div');
     list.className = 'dtv-picker-list';
@@ -310,35 +323,22 @@ class DatabaseTableView extends ItemView {
     input.setAttribute('aria-controls', listId);
     popup.appendChild(list);
 
-    const footer = document.createElement('div');
-    footer.className = 'dtv-picker-footer';
-    popup.appendChild(footer);
-
-    const footerMeta = document.createElement('div');
-    footerMeta.className = 'dtv-picker-footer-meta';
-    footer.appendChild(footerMeta);
-
-    const footerActions = document.createElement('div');
-    footerActions.className = 'dtv-picker-footer-actions';
-    footer.appendChild(footerActions);
-
-    const footerClear = document.createElement('button');
-    footerClear.className = 'dtv-picker-footer-button';
-    footerClear.type = 'button';
-    footerClear.textContent = 'Clear';
-    footerActions.appendChild(footerClear);
-
-    const footerApply = document.createElement('button');
-    footerApply.className = 'dtv-picker-footer-button is-primary';
-    footerApply.type = 'button';
-    footerApply.textContent = config.mode === 'multiple' ? 'Apply' : 'Select';
-    footerActions.appendChild(footerApply);
-
     const selectedIds = new Set(config.initialSelectedIds);
     let activeIndex = 0;
+    const clearEntryId = '__dtv_clear__';
 
     const getEntries = (): PickerEntry[] => {
-      return config.buildEntries(input.value, selectedIds);
+      const entries = config.buildEntries(input.value, selectedIds);
+      if (config.allowClear && selectedIds.size > 0) {
+        entries.unshift({
+          id: clearEntryId,
+          label: 'Clear',
+          meta: config.mode === 'multiple' ? 'Remove all selected values' : 'Remove current value',
+          selected: false,
+          clear: true,
+        });
+      }
+      return entries;
     };
 
     const getSelectedEntries = (): PickerEntry[] => {
@@ -359,25 +359,20 @@ class DatabaseTableView extends ItemView {
     };
 
     const renderSelection = (): void => {
-      selection.empty();
-
-      if (config.mode !== 'multiple') {
-        selection.addClass('is-hidden');
-        return;
-      }
-
-      selection.removeClass('is-hidden');
+      if (!selectionHost || config.mode !== 'multiple') return;
+      selectionHost.empty();
       const selectedEntries = getSelectedEntries();
       if (selectedEntries.length === 0) {
-        selection.createDiv({ cls: 'dtv-picker-selection-empty', text: 'No values selected' });
+        selectionHost.addClass('is-empty');
         return;
       }
+      selectionHost.removeClass('is-empty');
 
       for (const entry of selectedEntries) {
-        const token = selection.createDiv({ cls: 'dtv-picker-selection-token' });
-        token.createSpan({ cls: 'dtv-picker-selection-token-label', text: entry.label });
+        const token = selectionHost.createDiv({ cls: 'dtv-combobox-token' });
+        token.createSpan({ cls: 'dtv-combobox-token-label', text: entry.label });
         const removeButton = token.createEl('button', {
-          cls: 'dtv-picker-selection-token-remove',
+          cls: 'dtv-combobox-token-remove',
           text: 'x',
           attr: { 'aria-label': `Remove ${entry.label}` },
         });
@@ -388,24 +383,6 @@ class DatabaseTableView extends ItemView {
           selectedIds.delete(entry.id);
           renderEntries();
         });
-      }
-    };
-
-    const renderFooter = (): void => {
-      const hasSelection = selectedIds.size > 0;
-      inlineClear.toggleClass('is-hidden', !config.allowClear || !hasSelection);
-      footerClear.toggleClass('is-hidden', !config.allowClear || !hasSelection);
-
-      if (config.mode === 'multiple') {
-        footerMeta.textContent = hasSelection
-          ? `${selectedIds.size} selected`
-          : 'Choose one or more values';
-        footerApply.removeClass('is-hidden');
-      } else {
-        footerMeta.textContent = hasSelection
-          ? 'Press Enter or click to replace the current value'
-          : 'Type to filter or create a new value';
-        footerApply.addClass('is-hidden');
       }
     };
 
@@ -420,7 +397,6 @@ class DatabaseTableView extends ItemView {
         input.removeAttribute('aria-activedescendant');
         list.createDiv({ cls: 'dtv-picker-empty', text: 'No matching values' });
         renderSelection();
-        renderFooter();
         return;
       }
 
@@ -432,6 +408,7 @@ class DatabaseTableView extends ItemView {
         if (entry.selected) item.addClass('is-selected');
         if (index === activeIndex) item.addClass('is-active');
         if (entry.create) item.addClass('is-create');
+        if (entry.clear) item.addClass('is-clear');
 
         const marker = item.createDiv({ cls: 'dtv-picker-item-marker' });
         marker.setAttribute('aria-hidden', 'true');
@@ -445,6 +422,8 @@ class DatabaseTableView extends ItemView {
         const state = item.createDiv({ cls: 'dtv-picker-item-state' });
         if (entry.create) {
           state.setText('Create');
+        } else if (entry.clear) {
+          state.setText('Reset');
         } else if (entry.selected) {
           state.setText(config.mode === 'multiple' ? 'Added' : 'Selected');
         }
@@ -455,6 +434,17 @@ class DatabaseTableView extends ItemView {
         });
         item.addEventListener('click', async (event) => {
           event.stopPropagation();
+          if (entry.clear) {
+            selectedIds.clear();
+            if (config.mode === 'single') {
+              this.closeActivePicker();
+              await config.onCommit([]);
+              return;
+            }
+            renderEntries();
+            return;
+          }
+
           if (config.mode === 'single') {
             this.closeActivePicker();
             await config.onCommit([entry.id]);
@@ -472,7 +462,6 @@ class DatabaseTableView extends ItemView {
 
       syncActiveState();
       renderSelection();
-      renderFooter();
     };
 
     const commitAndClose = async (): Promise<void> => {
@@ -480,11 +469,17 @@ class DatabaseTableView extends ItemView {
       await config.onCommit([...selectedIds]);
     };
 
-    input.addEventListener('input', () => {
+    const cancelAndClose = (): void => {
+      this.closeActivePicker();
+      onCancel();
+    };
+
+    const handleInput = (): void => {
       activeIndex = 0;
       renderEntries();
-    });
-    input.addEventListener('keydown', (event) => {
+    };
+
+    const handleKeydown = (event: KeyboardEvent): void => {
       const entries = getEntries();
 
       if (event.key === 'ArrowDown') {
@@ -508,6 +503,16 @@ class DatabaseTableView extends ItemView {
         const entry = entries[activeIndex];
         if (!entry) return;
 
+        if (entry.clear) {
+          selectedIds.clear();
+          if (config.mode === 'single') {
+            void commitAndClose();
+            return;
+          }
+          renderEntries();
+          return;
+        }
+
         if (config.mode === 'single') {
           this.closeActivePicker();
           void config.onCommit([entry.id]);
@@ -526,53 +531,45 @@ class DatabaseTableView extends ItemView {
         event.preventDefault();
         if (config.mode === 'multiple') {
           void commitAndClose();
-        } else {
-          this.closeActivePicker();
+          return;
         }
+        cancelAndClose();
       }
-    });
 
-    inlineClear.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      selectedIds.clear();
-      if (config.mode === 'multiple') {
-        renderEntries();
-        return;
+      if (event.key === 'Tab') {
+        if (config.mode === 'multiple') {
+          void commitAndClose();
+          return;
+        }
+        cancelAndClose();
       }
-      await commitAndClose();
-    });
+    };
 
-    footerClear.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      selectedIds.clear();
-      if (config.mode === 'multiple') {
-        renderEntries();
-        return;
-      }
-      await commitAndClose();
-    });
-
-    footerApply.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      await commitAndClose();
-    });
+    input.addEventListener('input', handleInput);
+    input.addEventListener('keydown', handleKeydown);
 
     renderEntries();
     document.body.appendChild(popup);
     this.positionPicker(popup, anchor);
+    this.activePickerCleanup = () => {
+      input.removeEventListener('input', handleInput);
+      input.removeEventListener('keydown', handleKeydown);
+      input.removeAttribute('aria-expanded');
+      input.removeAttribute('aria-controls');
+      input.removeAttribute('aria-activedescendant');
+      input.removeAttribute('role');
+      input.removeAttribute('aria-autocomplete');
+    };
     input.focus();
     input.select();
 
     setTimeout(() => {
       this.activePickerHandler = (event: MouseEvent) => {
-        if (!this.activePicker || !this.isPickerEvent(event, popup)) {
+        if (!this.activePicker || !this.isPickerEvent(event, popup, [anchor])) {
           if (config.mode === 'multiple') {
             void commitAndClose();
           } else {
-            this.closeActivePicker();
+            cancelAndClose();
           }
         }
       };
@@ -1115,7 +1112,11 @@ class DatabaseTableView extends ItemView {
 
   private showSingleSelectPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): void {
     const currentValue = this.getCellTextValue(row, column);
-    this.openSearchPicker(anchor, {
+    const restore = (): void => {
+      void this.render();
+    };
+    const { input, selectionHost } = this.createComboboxEditor(anchor, 'single', 'Search or create an option...', currentValue);
+    this.openSearchPicker(anchor, input, selectionHost, {
       mode: 'single',
       placeholder: 'Search or create an option...',
       initialQuery: currentValue,
@@ -1151,14 +1152,18 @@ class DatabaseTableView extends ItemView {
         await updateColumnValue(this.app, row, column, nextValue);
         this.requestRefresh();
       },
-    });
+    }, restore);
   }
 
   private showMultiSelectPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): void {
     const currentValues = Array.isArray(row.values[column.id])
       ? (row.values[column.id] as string[])
       : [];
-    this.openSearchPicker(anchor, {
+    const restore = (): void => {
+      void this.render();
+    };
+    const { input, selectionHost } = this.createComboboxEditor(anchor, 'multiple', 'Search or create options...', '');
+    this.openSearchPicker(anchor, input, selectionHost, {
       mode: 'multiple',
       placeholder: 'Search or create options...',
       initialSelectedIds: currentValues,
@@ -1198,7 +1203,7 @@ class DatabaseTableView extends ItemView {
         await updateColumnValue(this.app, row, column, selectedIds);
         this.requestRefresh();
       },
-    });
+    }, restore);
   }
 
   private async showRelationPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): Promise<void> {
@@ -1215,9 +1220,14 @@ class DatabaseTableView extends ItemView {
 
     const targetRows = await loadRows(this.app, targetTable);
     const currentRelation = this.resolveRelationRow(row, column);
-    this.openSearchPicker(anchor, {
+    const restore = (): void => {
+      void this.render();
+    };
+    const { input, selectionHost } = this.createComboboxEditor(anchor, 'single', 'Search related rows...', currentRelation?.name ?? '');
+    this.openSearchPicker(anchor, input, selectionHost, {
       mode: 'single',
       placeholder: 'Search related rows...',
+      initialQuery: currentRelation?.name ?? '',
       initialSelectedIds: currentRelation ? [currentRelation.filePath] : [],
       allowClear: true,
       buildEntries: (query) => {
@@ -1249,7 +1259,7 @@ class DatabaseTableView extends ItemView {
         await updateColumnValue(this.app, row, column, relationValue);
         this.requestRefresh();
       },
-    });
+    }, restore);
   }
 
   private editTextCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema, currentValue: string): void {
