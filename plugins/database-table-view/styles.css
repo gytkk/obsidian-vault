@@ -18,6 +18,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  position: relative;
 }
 
 .dtv-folder-button,
@@ -100,6 +101,19 @@
   font-size: var(--font-ui-smaller);
 }
 
+.dtv-cell-editable {
+  cursor: pointer;
+}
+
+.dtv-cell-editable:hover {
+  background: var(--background-modifier-hover);
+}
+
+.dtv-cell-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
 .dtv-header-button {
   appearance: none;
   -webkit-appearance: none;
@@ -152,6 +166,104 @@
 .dtv-add-row-button {
   width: 100%;
   text-align: left;
+}
+
+.dtv-column-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 320px;
+  max-width: min(320px, 90vw);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-s, 0 8px 24px rgba(0, 0, 0, 0.14));
+  padding: 10px;
+  z-index: var(--layer-popover, 100);
+}
+
+.dtv-column-panel-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.dtv-column-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.dtv-column-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.dtv-column-item.is-dragging {
+  opacity: 0.45;
+}
+
+.dtv-column-item.is-drag-over {
+  border-color: var(--interactive-accent);
+}
+
+.dtv-column-drag-handle {
+  color: var(--text-faint);
+  cursor: grab;
+  user-select: none;
+}
+
+.dtv-column-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.dtv-column-name {
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dtv-column-type,
+.dtv-column-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.dtv-column-rename {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.dtv-column-rename:hover {
+  color: var(--text-normal);
+}
+
+.dtv-column-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.dtv-column-form-input,
+.dtv-column-form-select {
+  width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
 }
 
 .dtv-actions-header,

@@ -1,5 +1,7 @@
 import {
   createEmptyPluginData,
+  type ColumnSchema,
+  type ColumnType,
   type PageItem,
   type PageLayout,
   type PluginData,
@@ -18,6 +20,14 @@ export function normalizeFolderPath(path: string): string {
 export function generateId(prefix: string): string {
   const random = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${Date.now().toString(36)}-${random}`;
+}
+
+function normalizeColumnName(name: string): string {
+  return name.trim();
+}
+
+function matchesColumnName(left: string, right: string): boolean {
+  return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
 function sanitizePageItem(raw: unknown): PageItem | null {
@@ -265,5 +275,103 @@ export function renameTableSourceFolder(data: PluginData, oldPath: string, newPa
   delete data.folderToTableId[oldNormalized];
   table.sourceFolder = newNormalized;
   data.folderToTableId[newNormalized] = table.id;
+  return true;
+}
+
+export function getOrderedColumns(table: TableSchema, view: TableViewDefinition, includeHidden = false): ColumnSchema[] {
+  syncViewColumnOrder(table, view);
+  const columnsById = new Map(table.columns.map((column) => [column.id, column]));
+  const ordered = view.columnOrder
+    .map((columnId) => columnsById.get(columnId))
+    .filter((column): column is ColumnSchema => column !== undefined);
+
+  return includeHidden ? ordered : ordered.filter((column) => !column.hidden);
+}
+
+export function findColumnById(table: TableSchema, columnId: string): ColumnSchema | null {
+  return table.columns.find((column) => column.id === columnId) ?? null;
+}
+
+export function addColumn(
+  table: TableSchema,
+  view: TableViewDefinition,
+  input: {
+    name: string;
+    type: ColumnType;
+  },
+): { status: 'added' | 'restored' | 'invalid' | 'conflict'; column?: ColumnSchema } {
+  const nextName = normalizeColumnName(input.name);
+  if (!nextName || matchesColumnName(nextName, 'Name')) {
+    return { status: 'invalid' };
+  }
+
+  const existing = table.columns.find((column) => matchesColumnName(column.name, nextName));
+  if (existing) {
+    if (existing.hidden) {
+      existing.hidden = false;
+      syncViewColumnOrder(table, view);
+      return { status: 'restored', column: existing };
+    }
+    return { status: 'conflict', column: existing };
+  }
+
+  const column: ColumnSchema = {
+    id: generateId('column'),
+    name: nextName,
+    type: input.type,
+    hidden: false,
+    options: [],
+    relation: null,
+  };
+  table.columns.push(column);
+  syncViewColumnOrder(table, view);
+  return { status: 'added', column };
+}
+
+export function renameColumn(
+  table: TableSchema,
+  columnId: string,
+  nextNameInput: string,
+): { status: 'renamed' | 'invalid' | 'conflict'; column?: ColumnSchema; previousName?: string } {
+  const column = findColumnById(table, columnId);
+  if (!column) return { status: 'invalid' };
+
+  const nextName = normalizeColumnName(nextNameInput);
+  if (!nextName || matchesColumnName(nextName, 'Name')) {
+    return { status: 'invalid' };
+  }
+
+  const conflict = table.columns.find((candidate) => candidate.id !== columnId && matchesColumnName(candidate.name, nextName));
+  if (conflict) {
+    return { status: 'conflict', column: conflict };
+  }
+
+  if (column.name === nextName) {
+    return { status: 'renamed', column, previousName: column.name };
+  }
+
+  const previousName = column.name;
+  column.name = nextName;
+  return { status: 'renamed', column, previousName };
+}
+
+export function setColumnHidden(table: TableSchema, columnId: string, hidden: boolean): boolean {
+  const column = findColumnById(table, columnId);
+  if (!column || column.hidden === hidden) return false;
+  column.hidden = hidden;
+  return true;
+}
+
+export function reorderColumn(view: TableViewDefinition, columnId: string, targetIndex: number): boolean {
+  const currentIndex = view.columnOrder.indexOf(columnId);
+  if (currentIndex === -1 || currentIndex === targetIndex) return false;
+
+  const nextOrder = [...view.columnOrder];
+  const [moved] = nextOrder.splice(currentIndex, 1);
+  if (!moved) return false;
+
+  const boundedIndex = Math.max(0, Math.min(targetIndex, nextOrder.length));
+  nextOrder.splice(boundedIndex, 0, moved);
+  view.columnOrder = nextOrder;
   return true;
 }

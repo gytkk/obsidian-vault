@@ -1,6 +1,6 @@
-import { App, TFile, TFolder, Vault } from 'obsidian';
+import { App, TFile, TFolder, Vault, parseYaml } from 'obsidian';
 
-import type { RowRecord, TableSchema } from './models';
+import type { ColumnSchema, RowRecord, TableSchema } from './models';
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const INVALID_FILE_NAME_RE = /[\\/:*?"<>|]/g;
@@ -38,17 +38,19 @@ async function readFrontmatter(app: App, file: TFile): Promise<Record<string, un
   if (!match?.[1]) return {};
 
   try {
-    const parsed = app.metadataCache.getFileCache(file)?.frontmatter;
-    if (parsed) return parsed;
+    const parsed = parseYaml(match[1]);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
   } catch {
-    // Fall back to an empty object when metadata cache is unavailable.
+    // Invalid frontmatter is treated as empty so the table can still render.
   }
 
   return {};
 }
 
-export async function loadRows(app: App, table: TableSchema): Promise<RowRecord[]> {
-  const folder = app.vault.getAbstractFileByPath(table.sourceFolder);
+async function collectMarkdownFiles(app: App, sourceFolder: string): Promise<TFile[]> {
+  const folder = app.vault.getAbstractFileByPath(sourceFolder);
   if (!folder || !(folder instanceof TFolder)) return [];
 
   const files: TFile[] = [];
@@ -59,12 +61,60 @@ export async function loadRows(app: App, table: TableSchema): Promise<RowRecord[
   });
 
   files.sort((left, right) => left.basename.localeCompare(right.basename, 'ko', { numeric: true, sensitivity: 'base' }));
+  return files;
+}
+
+function normalizeColumnValue(column: ColumnSchema, rawValue: unknown): unknown {
+  switch (column.type) {
+    case 'checkbox':
+      return rawValue === true;
+    case 'multi-select':
+      if (Array.isArray(rawValue)) {
+        return rawValue.map((value) => String(value).trim()).filter(Boolean);
+      }
+      if (typeof rawValue === 'string') {
+        return rawValue.split(',').map((value) => value.trim()).filter(Boolean);
+      }
+      return [];
+    case 'relation':
+    case 'single-select':
+    case 'text':
+      if (rawValue === null || rawValue === undefined) return '';
+      return String(rawValue).trim();
+    default:
+      return rawValue;
+  }
+}
+
+function serializeColumnValue(column: ColumnSchema, value: unknown): unknown {
+  switch (column.type) {
+    case 'checkbox':
+      return value === true;
+    case 'multi-select': {
+      const normalized = Array.isArray(value)
+        ? value.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      return normalized.length > 0 ? normalized : undefined;
+    }
+    case 'relation':
+    case 'single-select':
+    case 'text': {
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      return normalized ? normalized : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+export async function loadRows(app: App, table: TableSchema): Promise<RowRecord[]> {
+  const files = await collectMarkdownFiles(app, table.sourceFolder);
 
   return Promise.all(files.map(async (file) => {
     const frontmatter = await readFrontmatter(app, file);
     const values: Record<string, unknown> = {};
     for (const column of table.columns) {
-      values[column.id] = frontmatter[column.name];
+      values[column.id] = normalizeColumnValue(column, frontmatter[column.name]);
     }
 
     return {
@@ -91,4 +141,40 @@ export async function renameRowFile(app: App, row: RowRecord, table: TableSchema
 
 export async function deleteRowFile(app: App, row: RowRecord): Promise<void> {
   await app.vault.trash(row.file, false);
+}
+
+export async function updateColumnValue(
+  app: App,
+  row: RowRecord,
+  column: ColumnSchema,
+  value: unknown,
+): Promise<void> {
+  const serialized = serializeColumnValue(column, value);
+  await app.fileManager.processFrontMatter(row.file, (frontmatter: Record<string, unknown>) => {
+    if (serialized === undefined) {
+      delete frontmatter[column.name];
+      return;
+    }
+    frontmatter[column.name] = serialized;
+  });
+}
+
+export async function renameColumnProperty(
+  app: App,
+  table: TableSchema,
+  previousName: string,
+  nextName: string,
+): Promise<void> {
+  if (previousName === nextName) return;
+
+  const files = await collectMarkdownFiles(app, table.sourceFolder);
+  for (const file of files) {
+    await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+      if (!(previousName in frontmatter)) return;
+      if (!(nextName in frontmatter)) {
+        frontmatter[nextName] = frontmatter[previousName];
+      }
+      delete frontmatter[previousName];
+    });
+  }
 }

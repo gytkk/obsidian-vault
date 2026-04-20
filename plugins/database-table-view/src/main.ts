@@ -9,9 +9,38 @@ import {
   WorkspaceLeaf,
 } from 'obsidian';
 
-import { createRowFile, deleteRowFile, loadRows, renameRowFile, validateRowName } from './frontmatter';
-import { NAME_COLUMN_ID, createEmptyPluginData, type PluginData, type RowRecord, type SortState, type TableSchema, type TableViewDefinition } from './models';
-import { ensureTableForFolder, getTableAndView, rememberRecentView, renameTableSourceFolder, sanitizePluginData } from './store';
+import {
+  createRowFile,
+  deleteRowFile,
+  loadRows,
+  renameColumnProperty,
+  renameRowFile,
+  updateColumnValue,
+  validateRowName,
+} from './frontmatter';
+import {
+  NAME_COLUMN_ID,
+  createEmptyPluginData,
+  type ColumnSchema,
+  type ColumnType,
+  type PluginData,
+  type RowRecord,
+  type SortState,
+  type TableSchema,
+  type TableViewDefinition,
+} from './models';
+import {
+  addColumn,
+  ensureTableForFolder,
+  getOrderedColumns,
+  getTableAndView,
+  rememberRecentView,
+  renameColumn,
+  renameTableSourceFolder,
+  reorderColumn,
+  sanitizePluginData,
+  setColumnHidden,
+} from './store';
 
 const VIEW_TYPE = 'database-table-view';
 const REFRESH_DEBOUNCE_MS = 250;
@@ -19,6 +48,23 @@ const REFRESH_DEBOUNCE_MS = 250;
 interface DraftRowState {
   key: string;
   name: string;
+}
+
+function getColumnTypeLabel(type: ColumnType): string {
+  switch (type) {
+    case 'text':
+      return 'Text';
+    case 'checkbox':
+      return 'Checkbox';
+    case 'single-select':
+      return 'Single select';
+    case 'multi-select':
+      return 'Multi select';
+    case 'relation':
+      return 'Relation';
+    default:
+      return type;
+  }
 }
 
 class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
@@ -108,7 +154,7 @@ class DatabaseTableView extends ItemView {
   requestRefresh(): void {
     if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
     this.refreshTimeout = setTimeout(() => {
-      this.render();
+      void this.render();
     }, REFRESH_DEBOUNCE_MS);
   }
 
@@ -127,6 +173,10 @@ class DatabaseTableView extends ItemView {
   async handleVaultChange(path: string): Promise<void> {
     if (!this.watchesPath(path)) return;
     this.requestRefresh();
+  }
+
+  private async persistPluginData(): Promise<void> {
+    await this.plugin.savePluginData();
   }
 
   private async render(): Promise<void> {
@@ -159,7 +209,8 @@ class DatabaseTableView extends ItemView {
     }
 
     const rows = await loadRows(this.app, definition.table);
-    const sortedRows = this.sortRows(rows, definition.view.sort);
+    const visibleColumns = getOrderedColumns(definition.table, definition.view);
+    const sortedRows = this.sortRows(rows, definition.view.sort, definition.table);
 
     const toolbar = container.createDiv({ cls: 'dtv-toolbar' });
     const leadingGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
@@ -168,15 +219,20 @@ class DatabaseTableView extends ItemView {
       text: definition.table.sourceFolder,
     });
     folderButton.addEventListener('click', () => this.plugin.openFolderPicker());
-    leadingGroup.createDiv({ cls: 'dtv-folder-meta', text: `${sortedRows.length} item${sortedRows.length === 1 ? '' : 's'}` });
+    leadingGroup.createDiv({
+      cls: 'dtv-folder-meta',
+      text: `${sortedRows.length} item${sortedRows.length === 1 ? '' : 's'} · ${visibleColumns.length} column${visibleColumns.length === 1 ? '' : 's'}`,
+    });
 
     const actionGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
+    this.renderColumnManagerButton(actionGroup, definition.table, definition.view);
+
     const newRowButton = actionGroup.createEl('button', { cls: 'dtv-action-button', text: '+ New row' });
     newRowButton.addEventListener('click', () => {
       if (!this.draftRow) {
         this.draftRow = { key: `${Date.now()}`, name: '' };
       }
-      this.render();
+      void this.render();
     });
 
     const wrapper = container.createDiv({ cls: 'dtv-table-wrapper' });
@@ -184,22 +240,26 @@ class DatabaseTableView extends ItemView {
     const thead = tableEl.createEl('thead');
     const headerRow = thead.createEl('tr');
     const nameHeader = headerRow.createEl('th');
-    this.renderSortableHeader(nameHeader, 'Name', NAME_COLUMN_ID, definition.view);
+    this.renderSortableHeader(nameHeader, 'Name', NAME_COLUMN_ID, definition.table, definition.view);
+    for (const column of visibleColumns) {
+      const th = headerRow.createEl('th');
+      this.renderSortableHeader(th, column.name, column.id, definition.table, definition.view);
+    }
     headerRow.createEl('th', { cls: 'dtv-actions-header' });
 
     const tbody = tableEl.createEl('tbody');
     for (const row of sortedRows) {
-      this.renderRow(tbody, row, definition.table);
+      this.renderRow(tbody, row, definition.table, visibleColumns);
     }
 
     if (this.draftRow) {
-      this.renderDraftRow(tbody, definition.table);
+      this.renderDraftRow(tbody, definition.table, visibleColumns);
     }
 
     const addRow = tbody.createEl('tr');
     const addCell = addRow.createEl('td', {
       cls: 'dtv-add-row-cell',
-      attr: { colspan: '2' },
+      attr: { colspan: String(visibleColumns.length + 2) },
     });
     const addButton = addCell.createEl('button', {
       cls: 'dtv-add-row-button',
@@ -209,7 +269,158 @@ class DatabaseTableView extends ItemView {
       if (!this.draftRow) {
         this.draftRow = { key: `${Date.now()}`, name: '' };
       }
-      this.render();
+      void this.render();
+    });
+  }
+
+  private renderColumnManagerButton(toolbar: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
+    const button = toolbar.createEl('button', { cls: 'dtv-action-button', text: 'Columns' });
+    let panel: HTMLElement | null = null;
+
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (panel) {
+        panel.remove();
+        panel = null;
+        return;
+      }
+
+      panel = toolbar.createDiv({ cls: 'dtv-column-panel' });
+      panel.addEventListener('click', (panelEvent) => panelEvent.stopPropagation());
+      this.renderColumnManagerPanel(panel, table, view);
+
+      const closePanel = (documentEvent: MouseEvent) => {
+        if (!panel) return;
+        if (!panel.contains(documentEvent.target as Node) && documentEvent.target !== button) {
+          panel.remove();
+          panel = null;
+          document.removeEventListener('click', closePanel);
+        }
+      };
+
+      setTimeout(() => {
+        document.addEventListener('click', closePanel);
+      }, 0);
+    });
+  }
+
+  private renderColumnManagerPanel(panel: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
+    panel.empty();
+    panel.createDiv({ cls: 'dtv-column-panel-title', text: 'Columns' });
+
+    const hiddenColumns = new Set(table.columns.filter((column) => column.hidden).map((column) => column.id));
+    let dragSourceId: string | null = null;
+
+    for (const column of getOrderedColumns(table, view, true)) {
+      const item = panel.createDiv({ cls: 'dtv-column-item' });
+      item.draggable = true;
+
+      const dragHandle = item.createSpan({ cls: 'dtv-column-drag-handle', text: '⠿' });
+      dragHandle.setAttribute('aria-hidden', 'true');
+
+      const visibility = item.createEl('input', { type: 'checkbox', cls: 'dtv-column-visibility' });
+      visibility.checked = !hiddenColumns.has(column.id);
+      visibility.addEventListener('change', async () => {
+        const changed = setColumnHidden(table, column.id, !visibility.checked);
+        if (!changed) return;
+        if (visibility.checked === false && view.sort?.columnId === column.id) {
+          view.sort = null;
+        }
+        await this.persistPluginData();
+        await this.render();
+      });
+
+      const meta = item.createDiv({ cls: 'dtv-column-meta' });
+      meta.createDiv({ cls: 'dtv-column-name', text: column.name });
+      meta.createDiv({ cls: 'dtv-column-type', text: getColumnTypeLabel(column.type) });
+
+      const renameButton = item.createEl('button', { cls: 'dtv-column-rename', text: 'Rename' });
+      renameButton.addEventListener('click', async () => {
+        const nextName = window.prompt('Column name', column.name);
+        if (nextName === null) return;
+
+        const result = renameColumn(table, column.id, nextName);
+        if (result.status === 'invalid') {
+          new Notice('Column name is invalid');
+          return;
+        }
+        if (result.status === 'conflict') {
+          new Notice(`A column named "${nextName.trim()}" already exists`);
+          return;
+        }
+        if (result.previousName && result.previousName !== result.column?.name) {
+          await renameColumnProperty(this.app, table, result.previousName, result.column?.name ?? result.previousName);
+        }
+        await this.persistPluginData();
+        await this.render();
+      });
+
+      item.addEventListener('dragstart', (event) => {
+        dragSourceId = column.id;
+        item.addClass('is-dragging');
+        event.dataTransfer?.setData('text/plain', column.id);
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+        }
+      });
+      item.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        item.addClass('is-drag-over');
+      });
+      item.addEventListener('dragleave', () => {
+        item.removeClass('is-drag-over');
+      });
+      item.addEventListener('drop', async (event) => {
+        event.preventDefault();
+        item.removeClass('is-drag-over');
+        if (!dragSourceId || dragSourceId === column.id) return;
+        const targetIndex = view.columnOrder.indexOf(column.id);
+        if (targetIndex === -1) return;
+        const changed = reorderColumn(view, dragSourceId, targetIndex);
+        if (!changed) return;
+        await this.persistPluginData();
+        await this.render();
+      });
+      item.addEventListener('dragend', () => {
+        dragSourceId = null;
+        item.removeClass('is-dragging');
+      });
+    }
+
+    if (table.columns.length === 0) {
+      panel.createDiv({ cls: 'dtv-column-empty', text: 'No columns yet. Name is always shown.' });
+    }
+
+    const form = panel.createDiv({ cls: 'dtv-column-form' });
+    const nameInput = form.createEl('input', {
+      cls: 'dtv-column-form-input',
+      type: 'text',
+      attr: { placeholder: 'Column name' },
+    });
+    const typeSelect = form.createEl('select', { cls: 'dtv-column-form-select' });
+    for (const type of ['text', 'checkbox'] as const) {
+      typeSelect.createEl('option', {
+        value: type,
+        text: getColumnTypeLabel(type),
+      });
+    }
+    const addButton = form.createEl('button', { cls: 'dtv-action-button', text: 'Add column' });
+    addButton.addEventListener('click', async () => {
+      const result = addColumn(table, view, {
+        name: nameInput.value,
+        type: typeSelect.value as ColumnType,
+      });
+      if (result.status === 'invalid') {
+        new Notice('Column name is invalid');
+        return;
+      }
+      if (result.status === 'conflict') {
+        new Notice(`A column named "${nameInput.value.trim()}" already exists`);
+        return;
+      }
+      nameInput.value = '';
+      await this.persistPluginData();
+      await this.render();
     });
   }
 
@@ -221,16 +432,22 @@ class DatabaseTableView extends ItemView {
     button.addEventListener('click', () => this.plugin.openFolderPicker());
   }
 
-  private renderSortableHeader(th: HTMLElement, label: string, columnId: string, view: TableViewDefinition): void {
-    const currentSort = view.sort;
-    const indicator = currentSort?.columnId === columnId
-      ? currentSort.direction === 'asc' ? ' ▲' : ' ▼'
+  private renderSortableHeader(
+    th: HTMLElement,
+    label: string,
+    columnId: string,
+    table: TableSchema,
+    view: TableViewDefinition,
+  ): void {
+    const indicator = view.sort?.columnId === columnId
+      ? view.sort.direction === 'asc' ? ' ▲' : ' ▼'
       : '';
     const button = th.createEl('button', {
       cls: 'dtv-header-button',
       text: `${label}${indicator}`,
     });
     button.addEventListener('click', async () => {
+      const currentSort = view.sort;
       if (!currentSort || currentSort.columnId !== columnId) {
         view.sort = { columnId, direction: 'asc' };
       } else if (currentSort.direction === 'asc') {
@@ -238,12 +455,19 @@ class DatabaseTableView extends ItemView {
       } else {
         view.sort = null;
       }
-      await this.plugin.savePluginData();
+      await this.persistPluginData();
       await this.render();
     });
+
+    if (columnId !== NAME_COLUMN_ID) {
+      const column = table.columns.find((candidate) => candidate.id === columnId);
+      if (column?.hidden) {
+        th.addClass('is-hidden');
+      }
+    }
   }
 
-  private renderRow(tbody: HTMLElement, row: RowRecord, table: TableSchema): void {
+  private renderRow(tbody: HTMLElement, row: RowRecord, table: TableSchema, columns: ColumnSchema[]): void {
     const tr = tbody.createEl('tr', { cls: 'dtv-row' });
     const nameCell = tr.createEl('td', { cls: 'dtv-name-cell' });
     const link = nameCell.createEl('a', {
@@ -260,6 +484,11 @@ class DatabaseTableView extends ItemView {
       this.editExistingNameCell(nameCell, row, table);
     });
 
+    for (const column of columns) {
+      const cell = tr.createEl('td');
+      this.renderCell(cell, row, column);
+    }
+
     const actionCell = tr.createEl('td', { cls: 'dtv-actions-cell' });
     const deleteButton = actionCell.createEl('button', {
       cls: 'dtv-delete-button',
@@ -274,7 +503,67 @@ class DatabaseTableView extends ItemView {
     });
   }
 
-  private renderDraftRow(tbody: HTMLElement, table: TableSchema): void {
+  private renderCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    if (column.type === 'checkbox') {
+      const checkbox = cell.createEl('input', { type: 'checkbox', cls: 'dtv-cell-checkbox' });
+      checkbox.checked = row.values[column.id] === true;
+      checkbox.addEventListener('change', async () => {
+        await updateColumnValue(this.app, row, column, checkbox.checked);
+        this.requestRefresh();
+      });
+      return;
+    }
+
+    const value = this.getCellTextValue(row, column);
+    cell.addClass('dtv-cell-editable');
+    cell.setText(value);
+    cell.addEventListener('click', () => {
+      if (cell.querySelector('input')) return;
+      this.editTextCell(cell, row, column, value);
+    });
+  }
+
+  private editTextCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema, currentValue: string): void {
+    cell.empty();
+    const input = cell.createEl('input', {
+      cls: 'dtv-cell-input',
+      type: 'text',
+      value: currentValue,
+    });
+    input.focus();
+    input.select();
+
+    const restore = async (): Promise<void> => {
+      await this.render();
+    };
+
+    const commit = async (): Promise<void> => {
+      const nextValue = input.value.trim();
+      if (nextValue === currentValue) {
+        await restore();
+        return;
+      }
+
+      await updateColumnValue(this.app, row, column, nextValue);
+      this.requestRefresh();
+    };
+
+    input.addEventListener('blur', () => {
+      void commit();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        void restore();
+      }
+    });
+  }
+
+  private renderDraftRow(tbody: HTMLElement, table: TableSchema, columns: ColumnSchema[]): void {
     const draft = this.draftRow;
     if (!draft) return;
 
@@ -292,12 +581,20 @@ class DatabaseTableView extends ItemView {
       input.select();
     });
 
+    for (const _column of columns) {
+      const cell = tr.createEl('td');
+      cell.createDiv({ cls: 'dtv-draft-hint', text: 'Set after create' });
+    }
+
     const actionCell = tr.createEl('td', { cls: 'dtv-actions-cell' });
     actionCell.createDiv({ cls: 'dtv-draft-hint', text: 'Draft' });
 
     const commit = async (): Promise<void> => {
       const validation = validateRowName(this.app, table, input.value);
       if (!validation.ok) {
+        if (validation.reason === 'duplicate') {
+          new Notice(`"${input.value.trim()}" already exists in ${table.sourceFolder}`);
+        }
         this.draftRow = null;
         await this.render();
         return;
@@ -314,7 +611,7 @@ class DatabaseTableView extends ItemView {
       }
     });
     input.addEventListener('blur', () => {
-      commit();
+      void commit();
     });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
@@ -324,7 +621,7 @@ class DatabaseTableView extends ItemView {
       if (event.key === 'Escape') {
         event.preventDefault();
         this.draftRow = null;
-        this.render();
+        void this.render();
       }
     });
   }
@@ -370,7 +667,7 @@ class DatabaseTableView extends ItemView {
     };
 
     input.addEventListener('blur', () => {
-      commit();
+      void commit();
     });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
@@ -379,16 +676,50 @@ class DatabaseTableView extends ItemView {
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        restore();
+        void restore();
       }
     });
   }
 
-  private sortRows(rows: RowRecord[], sort: SortState | null): RowRecord[] {
-    if (!sort || sort.columnId !== NAME_COLUMN_ID) return rows;
+  private getCellTextValue(row: RowRecord, column: ColumnSchema): string {
+    const rawValue = row.values[column.id];
+    if (Array.isArray(rawValue)) {
+      return rawValue.map((value) => String(value)).join(', ');
+    }
+    if (rawValue === null || rawValue === undefined) return '';
+    return String(rawValue);
+  }
+
+  private sortRows(rows: RowRecord[], sort: SortState | null, table: TableSchema): RowRecord[] {
+    if (!sort) return rows;
 
     const direction = sort.direction === 'asc' ? 1 : -1;
-    return [...rows].sort((left, right) => left.name.localeCompare(right.name, 'ko', { numeric: true, sensitivity: 'base' }) * direction);
+    if (sort.columnId === NAME_COLUMN_ID) {
+      return [...rows].sort((left, right) => left.name.localeCompare(right.name, 'ko', { numeric: true, sensitivity: 'base' }) * direction);
+    }
+
+    const column = table.columns.find((candidate) => candidate.id === sort.columnId);
+    if (!column) return rows;
+
+    return [...rows].sort((left, right) => {
+      const leftValue = left.values[column.id];
+      const rightValue = right.values[column.id];
+
+      if (column.type === 'checkbox') {
+        const leftBool = leftValue === true ? 1 : 0;
+        const rightBool = rightValue === true ? 1 : 0;
+        return (leftBool - rightBool) * direction;
+      }
+
+      const leftText = this.getCellTextValue(left, column);
+      const rightText = this.getCellTextValue(right, column);
+
+      if (!leftText && !rightText) return 0;
+      if (!leftText) return 1;
+      if (!rightText) return -1;
+
+      return leftText.localeCompare(rightText, 'ko', { numeric: true, sensitivity: 'base' }) * direction;
+    });
   }
 }
 
@@ -416,7 +747,7 @@ export default class DatabaseTableViewPlugin extends Plugin {
         item.setTitle('Open as database table');
         item.setIcon('table');
         item.onClick(() => {
-          this.activateForFolder(file.path);
+          void this.activateForFolder(file.path);
         });
       });
     }));
@@ -456,7 +787,7 @@ export default class DatabaseTableViewPlugin extends Plugin {
 
   openFolderPicker(): void {
     new FolderSuggestModal(this.app, (folder) => {
-      this.activateForFolder(folder.path);
+      void this.activateForFolder(folder.path);
     }).open();
   }
 
