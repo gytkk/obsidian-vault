@@ -471,17 +471,17 @@ class DatabaseTableView extends ItemView {
     const visibleColumns = getOrderedColumns(definition.table, definition.view);
     const sortedRows = this.sortRows(rows, definition.view.sort, definition.table);
 
-    const toolbar = container.createDiv({ cls: 'dtv-toolbar' });
+    const shell = container.createDiv({ cls: 'dtv-shell' });
+    this.renderMasthead(shell, definition.table, definition.view, sortedRows.length, visibleColumns.length);
+
+    const toolbar = shell.createDiv({ cls: 'dtv-toolbar' });
     const leadingGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
     const folderButton = leadingGroup.createEl('button', {
       cls: 'dtv-folder-button',
       text: definition.table.sourceFolder,
     });
     folderButton.addEventListener('click', () => this.plugin.openFolderPicker());
-    leadingGroup.createDiv({
-      cls: 'dtv-folder-meta',
-      text: `${sortedRows.length} item${sortedRows.length === 1 ? '' : 's'} · ${visibleColumns.length} column${visibleColumns.length === 1 ? '' : 's'}`,
-    });
+    leadingGroup.createDiv({ cls: 'dtv-folder-meta', text: 'Source folder' });
 
     const actionGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
     this.renderColumnManagerButton(actionGroup, definition.table, definition.view);
@@ -494,7 +494,7 @@ class DatabaseTableView extends ItemView {
       void this.render();
     });
 
-    const wrapper = container.createDiv({ cls: 'dtv-table-wrapper' });
+    const wrapper = shell.createDiv({ cls: 'dtv-table-wrapper' });
     const tableEl = wrapper.createEl('table', { cls: 'dtv-table' });
     const thead = tableEl.createEl('thead');
     const headerRow = thead.createEl('tr');
@@ -530,6 +530,42 @@ class DatabaseTableView extends ItemView {
       }
       void this.render();
     });
+  }
+
+  private renderMasthead(
+    container: HTMLElement,
+    table: TableSchema,
+    view: TableViewDefinition,
+    rowCount: number,
+    columnCount: number,
+  ): void {
+    const masthead = container.createDiv({ cls: 'dtv-masthead' });
+    const heading = masthead.createDiv({ cls: 'dtv-heading' });
+    heading.createDiv({ cls: 'dtv-kicker', text: 'Folder Database' });
+    heading.createEl('h2', {
+      cls: 'dtv-title',
+      text: this.getTableTitle(table),
+    });
+    heading.createDiv({
+      cls: 'dtv-subtitle',
+      text: `${table.sourceFolder} · ${view.name}`,
+    });
+
+    const stats = masthead.createDiv({ cls: 'dtv-stat-strip' });
+    this.renderStatChip(stats, 'Rows', String(rowCount));
+    this.renderStatChip(stats, 'Columns', String(columnCount));
+    this.renderStatChip(stats, 'View', view.name);
+  }
+
+  private renderStatChip(container: HTMLElement, label: string, value: string): void {
+    const chip = container.createDiv({ cls: 'dtv-stat-chip' });
+    chip.createDiv({ cls: 'dtv-stat-label', text: label });
+    chip.createDiv({ cls: 'dtv-stat-value', text: value });
+  }
+
+  private getTableTitle(table: TableSchema): string {
+    const segments = table.sourceFolder.split('/').filter(Boolean);
+    return segments[segments.length - 1] ?? table.sourceFolder;
   }
 
   private renderColumnManagerButton(toolbar: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
