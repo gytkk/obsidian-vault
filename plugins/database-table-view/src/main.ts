@@ -646,12 +646,6 @@ class DatabaseTableView extends ItemView {
       cls: 'dtv-title',
       text: this.getTableTitle(table),
     });
-    const sourceSummary = heading.createDiv({ cls: 'dtv-source-summary' });
-    sourceSummary.createDiv({ cls: 'dtv-source-label', text: 'Source folder' });
-    sourceSummary.createDiv({
-      cls: 'dtv-source-path',
-      text: table.sourceFolder,
-    });
 
     const actions = masthead.createDiv({ cls: 'dtv-masthead-actions' });
     const changeFolderButton = actions.createEl('button', {
