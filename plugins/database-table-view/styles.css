@@ -1,7 +1,7 @@
 .dtv-view {
   --dtv-name-col-width: 280px;
   --dtv-data-col-width: 190px;
-  --dtv-actions-col-width: 36px;
+  --dtv-actions-col-width: 44px;
   --dtv-outline: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
   --dtv-outline-strong: color-mix(in srgb, var(--background-modifier-border) 92%, black 8%);
   --dtv-surface: color-mix(in srgb, var(--background-primary) 86%, white 14%);
@@ -711,6 +711,8 @@
 
 .dtv-actions-cell {
   position: relative;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .dtv-delete-button {
@@ -722,13 +724,15 @@
   width: 100%;
   min-width: 100%;
   height: 44px;
+  min-height: 44px;
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
-  color: var(--text-faint);
-  font-size: 14px;
-  font-weight: 700;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+  font-size: 18px;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease;
@@ -741,6 +745,12 @@
 
 .theme-dark .dtv-delete-button:hover {
   background: color-mix(in srgb, var(--text-error) 20%, transparent);
+}
+
+.dtv-delete-button:focus,
+.dtv-delete-button:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 @media (max-width: 720px) {
