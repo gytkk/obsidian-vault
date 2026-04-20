@@ -13,7 +13,6 @@ import {
   createRowFile,
   deleteRowFile,
   loadRows,
-  renameColumnProperty,
   renameRowFile,
   updateColumnValue,
   validateRowName,
@@ -22,7 +21,6 @@ import {
   NAME_COLUMN_ID,
   createEmptyPluginData,
   type ColumnSchema,
-  type ColumnType,
   type PluginData,
   type RowRecord,
   type SortState,
@@ -30,16 +28,12 @@ import {
   type TableViewDefinition,
 } from './models';
 import {
-  addColumn,
   ensureTableForFolder,
   getOrderedColumns,
   getTableAndView,
   rememberRecentView,
-  renameColumn,
   renameTableSourceFolder,
-  reorderColumn,
   sanitizePluginData,
-  setColumnHidden,
 } from './store';
 
 const VIEW_TYPE = 'database-table-view';
@@ -68,23 +62,6 @@ interface SearchPickerConfig {
   allowClear: boolean;
   buildEntries: (query: string, selectedIds: Set<string>) => PickerEntry[];
   onCommit: (selectedIds: string[]) => Promise<void>;
-}
-
-function getColumnTypeLabel(type: ColumnType): string {
-  switch (type) {
-    case 'text':
-      return 'Text';
-    case 'checkbox':
-      return 'Checkbox';
-    case 'single-select':
-      return 'Single select';
-    case 'multi-select':
-      return 'Multi select';
-    case 'relation':
-      return 'Relation';
-    default:
-      return type;
-  }
 }
 
 function hashString(value: string): number {
@@ -131,15 +108,6 @@ class DatabaseTableView extends ItemView {
   private activePicker: HTMLElement | null = null;
   private activePickerHandler: ((event: MouseEvent) => void) | null = null;
   private activePickerCleanup: (() => void) | null = null;
-  private columnFormState: {
-    name: string;
-    type: ColumnType;
-    relationFolder: string;
-  } = {
-      name: '',
-      type: 'text',
-      relationFolder: '',
-    };
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -607,33 +575,16 @@ class DatabaseTableView extends ItemView {
       return;
     }
 
-    const rows = await loadRows(this.app, definition.table);
     const visibleColumns = getOrderedColumns(definition.table, definition.view);
-    const sortedRows = this.sortRows(rows, definition.view.sort, definition.table);
+    const sortedRows = this.sortRows(
+      await loadRows(this.app, definition.table),
+      definition.view.sort,
+      definition.table,
+    );
     const hasSchema = definition.table.columns.length > 0;
 
     const shell = container.createDiv({ cls: 'dtv-shell' });
-    this.renderMasthead(shell, definition.table, definition.view, sortedRows.length, visibleColumns.length);
-
-    const toolbar = shell.createDiv({ cls: 'dtv-toolbar' });
-    const leadingGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
-    const folderButton = leadingGroup.createEl('button', {
-      cls: 'dtv-folder-button',
-      text: definition.table.sourceFolder,
-    });
-    folderButton.addEventListener('click', () => this.plugin.openFolderPicker());
-    leadingGroup.createDiv({ cls: 'dtv-folder-meta', text: 'Source folder' });
-
-    const actionGroup = toolbar.createDiv({ cls: 'dtv-toolbar-group' });
-    this.renderColumnManagerButton(actionGroup, definition.table, definition.view);
-
-    const newRowButton = actionGroup.createEl('button', { cls: 'dtv-action-button', text: '+ New row' });
-    newRowButton.addEventListener('click', () => {
-      if (!this.draftRow) {
-        this.draftRow = { key: `${Date.now()}`, name: '' };
-      }
-      void this.render();
-    });
+    this.renderMasthead(shell, definition.table);
 
     if (!hasSchema) {
       this.renderSchemaHint(shell, definition.table);
@@ -687,9 +638,6 @@ class DatabaseTableView extends ItemView {
   private renderMasthead(
     container: HTMLElement,
     table: TableSchema,
-    view: TableViewDefinition,
-    rowCount: number,
-    columnCount: number,
   ): void {
     const masthead = container.createDiv({ cls: 'dtv-masthead' });
     const heading = masthead.createDiv({ cls: 'dtv-heading' });
@@ -698,21 +646,19 @@ class DatabaseTableView extends ItemView {
       cls: 'dtv-title',
       text: this.getTableTitle(table),
     });
-    heading.createDiv({
-      cls: 'dtv-subtitle',
-      text: `${table.sourceFolder} · ${view.name}`,
+    const sourceSummary = heading.createDiv({ cls: 'dtv-source-summary' });
+    sourceSummary.createDiv({ cls: 'dtv-source-label', text: 'Source folder' });
+    sourceSummary.createDiv({
+      cls: 'dtv-source-path',
+      text: table.sourceFolder,
     });
 
-    const stats = masthead.createDiv({ cls: 'dtv-stat-strip' });
-    this.renderStatChip(stats, 'Rows', String(rowCount));
-    this.renderStatChip(stats, 'Columns', String(columnCount));
-    this.renderStatChip(stats, 'View', view.name);
-  }
-
-  private renderStatChip(container: HTMLElement, label: string, value: string): void {
-    const chip = container.createDiv({ cls: 'dtv-stat-chip' });
-    chip.createDiv({ cls: 'dtv-stat-label', text: label });
-    chip.createDiv({ cls: 'dtv-stat-value', text: value });
+    const actions = masthead.createDiv({ cls: 'dtv-masthead-actions' });
+    const changeFolderButton = actions.createEl('button', {
+      cls: 'dtv-action-button',
+      text: 'Change source folder',
+    });
+    changeFolderButton.addEventListener('click', () => this.plugin.openFolderPicker());
   }
 
   private renderSchemaHint(container: HTMLElement, table: TableSchema): void {
@@ -720,204 +666,13 @@ class DatabaseTableView extends ItemView {
     hint.createDiv({ cls: 'dtv-schema-hint-title', text: 'Name-only table' });
     hint.createDiv({
       cls: 'dtv-schema-hint-text',
-      text: `No columns are configured for ${table.sourceFolder} yet. Add columns from the Columns menu, or open a child folder like database-demo/projects to see the seeded demo schema.`,
+      text: `No columns are configured for ${table.sourceFolder} yet. This table is currently showing only the note name column.`,
     });
   }
 
   private getTableTitle(table: TableSchema): string {
     const segments = table.sourceFolder.split('/').filter(Boolean);
     return segments[segments.length - 1] ?? table.sourceFolder;
-  }
-
-  private renderColumnManagerButton(toolbar: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
-    const button = toolbar.createEl('button', { cls: 'dtv-action-button', text: 'Columns' });
-    let panel: HTMLElement | null = null;
-
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (panel) {
-        panel.remove();
-        panel = null;
-        return;
-      }
-
-      panel = toolbar.createDiv({ cls: 'dtv-column-panel' });
-      panel.addEventListener('click', (panelEvent) => panelEvent.stopPropagation());
-      this.renderColumnManagerPanel(panel, table, view);
-
-      const closePanel = (documentEvent: MouseEvent) => {
-        if (!panel) return;
-        if (!panel.contains(documentEvent.target as Node) && documentEvent.target !== button) {
-          panel.remove();
-          panel = null;
-          document.removeEventListener('click', closePanel);
-        }
-      };
-
-      setTimeout(() => {
-        document.addEventListener('click', closePanel);
-      }, 0);
-    });
-  }
-
-  private renderColumnManagerPanel(panel: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
-    panel.empty();
-    panel.createDiv({ cls: 'dtv-column-panel-title', text: 'Columns' });
-
-    const hiddenColumns = new Set(table.columns.filter((column) => column.hidden).map((column) => column.id));
-    let dragSourceId: string | null = null;
-
-    for (const column of getOrderedColumns(table, view, true)) {
-      const item = panel.createDiv({ cls: 'dtv-column-item' });
-      item.draggable = true;
-
-      const dragHandle = item.createSpan({ cls: 'dtv-column-drag-handle', text: '⠿' });
-      dragHandle.setAttribute('aria-hidden', 'true');
-
-      const visibility = item.createEl('input', { type: 'checkbox', cls: 'dtv-column-visibility' });
-      visibility.checked = !hiddenColumns.has(column.id);
-      visibility.addEventListener('change', async () => {
-        const changed = setColumnHidden(table, column.id, !visibility.checked);
-        if (!changed) return;
-        if (visibility.checked === false && view.sort?.columnId === column.id) {
-          view.sort = null;
-        }
-        await this.persistPluginData();
-        await this.render();
-      });
-
-      const meta = item.createDiv({ cls: 'dtv-column-meta' });
-      meta.createDiv({ cls: 'dtv-column-name', text: column.name });
-      meta.createDiv({ cls: 'dtv-column-type', text: getColumnTypeLabel(column.type) });
-
-      const renameButton = item.createEl('button', { cls: 'dtv-column-rename', text: 'Rename' });
-      renameButton.addEventListener('click', async () => {
-        const nextName = window.prompt('Column name', column.name);
-        if (nextName === null) return;
-
-        const result = renameColumn(table, column.id, nextName);
-        if (result.status === 'invalid') {
-          new Notice('Column name is invalid');
-          return;
-        }
-        if (result.status === 'conflict') {
-          new Notice(`A column named "${nextName.trim()}" already exists`);
-          return;
-        }
-        if (result.previousName && result.previousName !== result.column?.name) {
-          await renameColumnProperty(this.app, table, result.previousName, result.column?.name ?? result.previousName);
-        }
-        await this.persistPluginData();
-        await this.render();
-      });
-
-      item.addEventListener('dragstart', (event) => {
-        dragSourceId = column.id;
-        item.addClass('is-dragging');
-        event.dataTransfer?.setData('text/plain', column.id);
-        if (event.dataTransfer) {
-          event.dataTransfer.effectAllowed = 'move';
-        }
-      });
-      item.addEventListener('dragover', (event) => {
-        event.preventDefault();
-        item.addClass('is-drag-over');
-      });
-      item.addEventListener('dragleave', () => {
-        item.removeClass('is-drag-over');
-      });
-      item.addEventListener('drop', async (event) => {
-        event.preventDefault();
-        item.removeClass('is-drag-over');
-        if (!dragSourceId || dragSourceId === column.id) return;
-        const targetIndex = view.columnOrder.indexOf(column.id);
-        if (targetIndex === -1) return;
-        const changed = reorderColumn(view, dragSourceId, targetIndex);
-        if (!changed) return;
-        await this.persistPluginData();
-        await this.render();
-      });
-      item.addEventListener('dragend', () => {
-        dragSourceId = null;
-        item.removeClass('is-dragging');
-      });
-    }
-
-    if (table.columns.length === 0) {
-      panel.createDiv({ cls: 'dtv-column-empty', text: 'No columns yet. Name is always shown.' });
-    }
-
-    const form = panel.createDiv({ cls: 'dtv-column-form' });
-    const nameInput = form.createEl('input', {
-      cls: 'dtv-column-form-input',
-      type: 'text',
-      value: this.columnFormState.name,
-      attr: { placeholder: 'Column name' },
-    });
-    nameInput.addEventListener('input', () => {
-      this.columnFormState.name = nameInput.value;
-    });
-
-    const typeSelect = form.createEl('select', { cls: 'dtv-column-form-select' });
-    for (const type of ['text', 'checkbox', 'single-select', 'multi-select', 'relation'] as const) {
-      const option = typeSelect.createEl('option', {
-        value: type,
-        text: getColumnTypeLabel(type),
-      });
-      option.selected = type === this.columnFormState.type;
-    }
-    typeSelect.addEventListener('change', () => {
-      this.columnFormState.type = typeSelect.value as ColumnType;
-      this.renderColumnManagerPanel(panel, table, view);
-    });
-
-    if (this.columnFormState.type === 'relation') {
-      const relationButton = form.createEl('button', {
-        cls: 'dtv-folder-button',
-        text: this.columnFormState.relationFolder || 'Choose relation folder',
-      });
-      relationButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        new FolderSuggestModal(this.app, (folder) => {
-          this.columnFormState.relationFolder = folder.path;
-          this.renderColumnManagerPanel(panel, table, view);
-        }).open();
-      });
-    }
-
-    const addButton = form.createEl('button', { cls: 'dtv-action-button', text: 'Add column' });
-    addButton.addEventListener('click', async () => {
-      let relationTableId: string | null = null;
-      if (this.columnFormState.type === 'relation') {
-        if (!this.columnFormState.relationFolder) {
-          new Notice('Choose a relation folder');
-          return;
-        }
-        relationTableId = ensureTableForFolder(this.plugin.data, this.columnFormState.relationFolder).table.id;
-      }
-
-      const result = addColumn(table, view, {
-        name: this.columnFormState.name,
-        type: this.columnFormState.type,
-        relationTableId,
-      });
-      if (result.status === 'invalid') {
-        new Notice('Column name is invalid');
-        return;
-      }
-      if (result.status === 'conflict') {
-        new Notice(`A column named "${this.columnFormState.name.trim()}" already exists`);
-        return;
-      }
-
-      this.columnFormState = {
-        name: '',
-        type: 'text',
-        relationFolder: '',
-      };
-      await this.persistPluginData();
-      await this.render();
-    });
   }
 
   private renderEmptyState(container: HTMLElement): void {
