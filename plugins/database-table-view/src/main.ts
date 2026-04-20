@@ -333,7 +333,6 @@ class DatabaseTableView extends ItemView {
         entries.unshift({
           id: clearEntryId,
           label: 'Clear',
-          meta: config.mode === 'multiple' ? 'Remove all selected values' : 'Remove current value',
           selected: false,
           clear: true,
         });
