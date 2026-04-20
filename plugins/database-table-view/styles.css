@@ -280,6 +280,8 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  padding-top: 0;
+  padding-bottom: 0;
   background: color-mix(in srgb, var(--dtv-surface-elevated) 90%, white 10%);
   color: var(--dtv-ink-soft);
   font-size: 11px;
@@ -287,6 +289,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   backdrop-filter: blur(10px);
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .theme-dark .dtv-table th {
@@ -345,53 +348,69 @@
 
 .dtv-th.is-sortable {
   cursor: pointer;
+  user-select: none;
 }
 
 .dtv-header-content {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 999px;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  min-height: 46px;
+  width: 100%;
+  padding: 0;
+  transition: color 0.12s ease;
+}
+
+.dtv-th.is-sortable:hover {
+  background: color-mix(in srgb, var(--background-modifier-hover) 60%, var(--dtv-surface-elevated));
+}
+
+.theme-dark .dtv-th.is-sortable:hover {
+  background: color-mix(in srgb, var(--background-modifier-hover) 72%, var(--dtv-surface-elevated));
 }
 
 .dtv-th.is-sortable:hover .dtv-header-content {
-  background: color-mix(in srgb, var(--background-modifier-hover) 88%, transparent);
   color: var(--text-normal);
 }
 
+.dtv-th.is-sorted {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--dtv-accent) 70%, transparent);
+}
+
 .dtv-th.is-sorted .dtv-header-content {
-  background: color-mix(in srgb, var(--dtv-accent) 14%, transparent);
   color: var(--text-normal);
 }
 
 .dtv-header-label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dtv-header-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--background-primary) 80%, transparent);
+  min-width: 12px;
+  height: 16px;
+  flex-shrink: 0;
   color: var(--dtv-ink-soft);
   font-size: 10px;
   font-weight: 800;
-  opacity: 0.72;
-}
-
-.theme-dark .dtv-header-indicator {
-  background: color-mix(in srgb, var(--background-primary) 62%, black 38%);
+  letter-spacing: 0;
+  opacity: 0.44;
+  transition: opacity 0.12s ease, color 0.12s ease, transform 0.12s ease;
 }
 
 .dtv-header-indicator.is-visible {
-  background: color-mix(in srgb, var(--dtv-accent) 18%, transparent);
   color: var(--dtv-accent);
   opacity: 1;
+  transform: translateY(-0.5px);
+}
+
+.dtv-th.is-sortable:hover .dtv-header-indicator {
+  opacity: 0.8;
 }
 
 .dtv-row {
