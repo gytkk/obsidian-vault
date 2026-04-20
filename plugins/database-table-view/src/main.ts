@@ -1265,6 +1265,7 @@ class DatabaseTableView extends ItemView {
 
   private editTextCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema, currentValue: string): void {
     cell.empty();
+    cell.addClass('dtv-cell-editing');
     const input = cell.createEl('input', {
       cls: 'dtv-cell-input',
       type: 'text',
@@ -1309,6 +1310,7 @@ class DatabaseTableView extends ItemView {
 
     const tr = tbody.createEl('tr', { cls: 'dtv-row' });
     const nameCell = tr.createEl('td', { cls: 'dtv-name-cell' });
+    nameCell.addClass('dtv-cell-editing');
     const input = nameCell.createEl('input', {
       cls: 'dtv-cell-input',
       type: 'text',
@@ -1371,6 +1373,7 @@ class DatabaseTableView extends ItemView {
 
     const oldName = row.name;
     cell.empty();
+    cell.addClass('dtv-cell-editing');
     const input = cell.createEl('input', {
       cls: 'dtv-cell-input',
       type: 'text',

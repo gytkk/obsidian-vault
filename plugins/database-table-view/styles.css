@@ -463,7 +463,7 @@
 .dtv-cell-input {
   width: 100%;
   max-width: 100%;
-  min-height: 38px;
+  min-height: 32px;
   box-sizing: border-box;
   border: 1px solid var(--dtv-outline-strong);
   background: color-mix(in srgb, var(--background-primary) 94%, white 6%);
@@ -629,12 +629,17 @@
   background: color-mix(in srgb, var(--background-modifier-hover) 80%, transparent);
 }
 
+.dtv-table td.dtv-cell-editing {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .dtv-combobox-editor {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  min-height: 38px;
+  min-height: 32px;
 }
 
 .dtv-combobox-selection {
@@ -689,7 +694,7 @@
 .dtv-combobox-input {
   flex: 1;
   min-width: 88px;
-  min-height: 38px;
+  min-height: 32px;
   padding: 0;
   border: none;
   background: transparent;
