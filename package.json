@@ -5,10 +5,12 @@
   "description": "Custom Obsidian plugins monorepo",
   "scripts": {
     "build": "for dir in plugins/*/; do echo \"Building $(basename $dir)...\" && (cd \"$dir\" && bun run build); done",
+    "build:database-table-view": "cd plugins/database-table-view && bun run build",
     "build:editable-view": "cd plugins/editable-view && bun run build",
     "build:event-inline-editor": "cd plugins/event-inline-editor && bun run build",
     "build:todo-inline-editor": "cd plugins/todo-inline-editor && bun run build",
     "deploy": "./deploy.sh",
+    "deploy:database-table-view": "./deploy.sh database-table-view",
     "deploy:editable-view": "./deploy.sh editable-view",
     "deploy:event-inline-editor": "./deploy.sh event-inline-editor",
     "deploy:todo-inline-editor": "./deploy.sh todo-inline-editor"

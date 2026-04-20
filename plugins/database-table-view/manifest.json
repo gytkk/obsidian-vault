@@ -1,0 +1,9 @@
+{
+  "id": "database-table-view",
+  "name": "Database Table View",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.4",
+  "description": "Folder-backed editable database tables for Obsidian.",
+  "author": "gytkk",
+  "isDesktopOnly": false
+}
