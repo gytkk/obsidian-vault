@@ -999,9 +999,10 @@ class DatabaseTableView extends ItemView {
     const actionCell = tr.createEl('td', { cls: 'dtv-actions-cell' });
     const deleteButton = actionCell.createEl('button', {
       cls: 'dtv-delete-button',
-      text: '×',
-      attr: { 'aria-label': 'Delete row' },
+      attr: { 'aria-label': 'Delete row', type: 'button' },
     });
+    deleteButton.createSpan({ cls: 'dtv-delete-icon' });
+    deleteButton.createSpan({ cls: 'dtv-visually-hidden', text: 'Delete row' });
     deleteButton.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();

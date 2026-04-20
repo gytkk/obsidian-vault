@@ -40,6 +40,18 @@
   gap: 14px;
 }
 
+.dtv-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .dtv-masthead {
   display: flex;
   align-items: flex-end;
@@ -838,39 +850,94 @@
 .dtv-delete-button {
   appearance: none;
   -webkit-appearance: none;
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  min-width: 100%;
-  height: 44px;
-  min-height: 44px;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: 8px;
   background: transparent;
   box-shadow: none;
-  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  color: var(--text-muted);
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.dtv-row:hover .dtv-delete-button,
+.dtv-row:focus-within .dtv-delete-button,
+.dtv-delete-button:focus-visible {
+  opacity: 0.72;
+  transform: scale(1);
+}
+
+.dtv-delete-icon {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.dtv-delete-icon::before,
+.dtv-delete-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+}
+
+.dtv-delete-icon::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.dtv-delete-icon::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .dtv-delete-button:hover {
-  background: color-mix(in srgb, var(--text-error) 14%, transparent);
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-error) 12%, transparent);
+  color: var(--text-error);
+}
+
+.dtv-delete-button:active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
   color: var(--text-error);
 }
 
 .theme-dark .dtv-delete-button:hover {
-  background: color-mix(in srgb, var(--text-error) 20%, transparent);
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
+}
+
+.theme-dark .dtv-delete-button:active {
+  background: color-mix(in srgb, var(--text-error) 24%, transparent);
 }
 
 .dtv-delete-button:focus,
 .dtv-delete-button:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+.dtv-delete-button:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-error) 10%, transparent);
+  color: var(--text-error);
 }
 
 @media (max-width: 720px) {
