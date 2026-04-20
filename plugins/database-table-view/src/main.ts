@@ -470,6 +470,7 @@ class DatabaseTableView extends ItemView {
     const rows = await loadRows(this.app, definition.table);
     const visibleColumns = getOrderedColumns(definition.table, definition.view);
     const sortedRows = this.sortRows(rows, definition.view.sort, definition.table);
+    const hasSchema = definition.table.columns.length > 0;
 
     const shell = container.createDiv({ cls: 'dtv-shell' });
     this.renderMasthead(shell, definition.table, definition.view, sortedRows.length, visibleColumns.length);
@@ -493,6 +494,10 @@ class DatabaseTableView extends ItemView {
       }
       void this.render();
     });
+
+    if (!hasSchema) {
+      this.renderSchemaHint(shell, definition.table);
+    }
 
     const wrapper = shell.createDiv({ cls: 'dtv-table-wrapper' });
     const tableEl = wrapper.createEl('table', { cls: 'dtv-table' });
@@ -561,6 +566,15 @@ class DatabaseTableView extends ItemView {
     const chip = container.createDiv({ cls: 'dtv-stat-chip' });
     chip.createDiv({ cls: 'dtv-stat-label', text: label });
     chip.createDiv({ cls: 'dtv-stat-value', text: value });
+  }
+
+  private renderSchemaHint(container: HTMLElement, table: TableSchema): void {
+    const hint = container.createDiv({ cls: 'dtv-schema-hint' });
+    hint.createDiv({ cls: 'dtv-schema-hint-title', text: 'Name-only table' });
+    hint.createDiv({
+      cls: 'dtv-schema-hint-text',
+      text: `No columns are configured for ${table.sourceFolder} yet. Add columns from the Columns menu, or open a child folder like database-demo/projects to see the seeded demo schema.`,
+    });
   }
 
   private getTableTitle(table: TableSchema): string {
@@ -774,14 +788,24 @@ class DatabaseTableView extends ItemView {
     table: TableSchema,
     view: TableViewDefinition,
   ): void {
-    const indicator = view.sort?.columnId === columnId
-      ? view.sort.direction === 'asc' ? ' ▲' : ' ▼'
-      : '';
-    const button = th.createEl('button', {
-      cls: 'dtv-header-button',
-      text: `${label}${indicator}`,
+    const isSorted = view.sort?.columnId === columnId;
+    th.addClass('dtv-th', 'is-sortable');
+    if (isSorted) {
+      th.addClass('is-sorted');
+    }
+
+    const content = th.createDiv({ cls: 'dtv-header-content' });
+    content.createSpan({ cls: 'dtv-header-label', text: label });
+
+    const indicator = content.createSpan({
+      cls: `dtv-header-indicator${isSorted ? ' is-visible' : ''}`,
+      text: isSorted
+        ? view.sort?.direction === 'asc' ? '▲' : '▼'
+        : '↕',
     });
-    button.addEventListener('click', async () => {
+    indicator.setAttribute('aria-hidden', 'true');
+
+    th.addEventListener('click', async () => {
       const currentSort = view.sort;
       if (!currentSort || currentSort.columnId !== columnId) {
         view.sort = { columnId, direction: 'asc' };
