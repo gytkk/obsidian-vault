@@ -1352,16 +1352,14 @@ export default class DatabaseTableViewPlugin extends Plugin {
   }
 
   private async getOrCreateLeaf(): Promise<WorkspaceLeaf> {
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE)
+      .find((leaf) => leaf.getRoot() === this.app.workspace.rootSplit);
     if (existing) {
       this.app.workspace.revealLeaf(existing);
       return existing;
     }
 
-    const leaf = this.app.workspace.getRightLeaf(false);
-    if (!leaf) {
-      throw new Error('Unable to open a workspace leaf');
-    }
+    const leaf = this.app.workspace.getLeaf('tab');
 
     await leaf.setViewState({ type: VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
