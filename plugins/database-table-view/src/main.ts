@@ -74,6 +74,7 @@ interface SearchPickerConfig {
   initialQuery?: string;
   initialSelectedIds: string[];
   allowClear: boolean;
+  commitOnSelection?: boolean;
   buildEntries: (query: string, selectedIds: Set<string>) => PickerEntry[];
   onCommit: (selectedIds: string[]) => Promise<void>;
   onDeleteEntry?: (entryId: string) => Promise<void>;
@@ -401,6 +402,10 @@ class DatabaseTableView extends ItemView {
           event.preventDefault();
           event.stopPropagation();
           selectedIds.delete(entry.id);
+          if (config.commitOnSelection) {
+            void commitAndClose();
+            return;
+          }
           renderEntries();
         });
       }
@@ -477,9 +482,8 @@ class DatabaseTableView extends ItemView {
           event.stopPropagation();
           if (entry.clear) {
             selectedIds.clear();
-            if (config.mode === 'single') {
-              this.closeActivePicker();
-              await config.onCommit([]);
+            if (config.mode === 'single' || config.commitOnSelection) {
+              await commitAndClose();
               return;
             }
             renderEntries();
@@ -496,6 +500,10 @@ class DatabaseTableView extends ItemView {
             selectedIds.delete(entry.id);
           } else {
             selectedIds.add(entry.id);
+          }
+          if (config.commitOnSelection) {
+            await commitAndClose();
+            return;
           }
           renderEntries();
         });
@@ -546,7 +554,7 @@ class DatabaseTableView extends ItemView {
 
         if (entry.clear) {
           selectedIds.clear();
-          if (config.mode === 'single') {
+          if (config.mode === 'single' || config.commitOnSelection) {
             void commitAndClose();
             return;
           }
@@ -564,6 +572,10 @@ class DatabaseTableView extends ItemView {
           selectedIds.delete(entry.id);
         } else {
           selectedIds.add(entry.id);
+        }
+        if (config.commitOnSelection) {
+          void commitAndClose();
+          return;
         }
         renderEntries();
       }
@@ -1662,6 +1674,7 @@ class DatabaseTableView extends ItemView {
       placeholder: 'Search related rows...',
       initialSelectedIds: this.getRelationSelectionIds(row, column),
       allowClear: true,
+      commitOnSelection: true,
       buildEntries: (query, selectedIds) => this.buildRelationPickerEntries(targetRows, targetTable, query, selectedIds),
       onCommit: async (selectedIds) => {
         const relationValues = await this.materializeRelationSelectionValues(selectedIds, targetRows, targetTable, row.filePath);
