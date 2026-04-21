@@ -4,6 +4,7 @@ import type { ColumnSchema, RowRecord, TableSchema } from './models';
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const INVALID_FILE_NAME_RE = /[\\/:*?"<>|]/g;
+const WIKILINK_GLOBAL_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
 export function sanitizeFileBaseName(value: string): string {
   return value.replace(INVALID_FILE_NAME_RE, '-').replace(/\s+/g, ' ').trim();
@@ -76,6 +77,20 @@ function normalizeColumnValue(column: ColumnSchema, rawValue: unknown): unknown 
         return rawValue.split(',').map((value) => value.trim()).filter(Boolean);
       }
       return [];
+    case 'multi-relation':
+      if (Array.isArray(rawValue)) {
+        return rawValue.map((value) => String(value).trim()).filter(Boolean);
+      }
+      if (typeof rawValue === 'string') {
+        const trimmed = rawValue.trim();
+        if (!trimmed) return [];
+        const matches = [...trimmed.matchAll(WIKILINK_GLOBAL_RE)].map((match) => match[0].trim()).filter(Boolean);
+        if (matches.length > 0) {
+          return matches;
+        }
+        return trimmed.split(',').map((value) => value.trim()).filter(Boolean);
+      }
+      return [];
     case 'relation':
     case 'single-select':
     case 'text':
@@ -91,6 +106,12 @@ function serializeColumnValue(column: ColumnSchema, value: unknown): unknown {
     case 'checkbox':
       return value === true;
     case 'multi-select': {
+      const normalized = Array.isArray(value)
+        ? value.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      return normalized.length > 0 ? normalized : undefined;
+    }
+    case 'multi-relation': {
       const normalized = Array.isArray(value)
         ? value.map((entry) => String(entry).trim()).filter(Boolean)
         : [];

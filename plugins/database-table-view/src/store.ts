@@ -102,7 +102,8 @@ function sanitizeTable(raw: unknown): TableSchema | null {
         || column['type'] === 'checkbox'
         || column['type'] === 'single-select'
         || column['type'] === 'multi-select'
-        || column['type'] === 'relation')
+        || column['type'] === 'relation'
+        || column['type'] === 'multi-relation')
       && typeof column['hidden'] === 'boolean'
       && Array.isArray(column['options'])
       && column['options'].every((option) => typeof option === 'string')
@@ -305,7 +306,7 @@ export function addColumn(
   if (!nextName || matchesColumnName(nextName, 'Name')) {
     return { status: 'invalid' };
   }
-  if (input.type === 'relation' && !input.relationTableId) {
+  if ((input.type === 'relation' || input.type === 'multi-relation') && !input.relationTableId) {
     return { status: 'invalid' };
   }
 
@@ -325,7 +326,7 @@ export function addColumn(
     type: input.type,
     hidden: false,
     options: [],
-    relation: input.type === 'relation' && input.relationTableId
+    relation: (input.type === 'relation' || input.type === 'multi-relation') && input.relationTableId
       ? { tableId: input.relationTableId, displayField: 'name' }
       : null,
   };

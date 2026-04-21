@@ -615,6 +615,17 @@
   white-space: nowrap;
 }
 
+.dtv-tag-link,
+.dtv-tag-link.internal-link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.dtv-tag-link:hover,
+.dtv-tag-link.internal-link:hover {
+  color: inherit;
+}
+
 .theme-dark .dtv-tag {
   background: hsl(var(--dtv-tag-hue) 42% 28% / 0.92);
   color: hsl(var(--dtv-tag-hue) 72% 88%);

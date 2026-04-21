@@ -50,6 +50,9 @@ import {
 const VIEW_TYPE = 'database-table-view';
 const REFRESH_DEBOUNCE_MS = 250;
 const WIKILINK_RE = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/;
+const WIKILINK_GLOBAL_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+const CREATE_RELATION_ENTRY_PREFIX = '__dtv_create_relation__:';
+const RAW_RELATION_ENTRY_PREFIX = '__dtv_raw_relation__:';
 
 interface DraftRowState {
   key: string;
@@ -76,6 +79,17 @@ interface SearchPickerConfig {
   onDeleteEntry?: (entryId: string) => Promise<void>;
 }
 
+interface RelationValuePart {
+  rawValue: string;
+  target: string;
+  label: string;
+}
+
+interface RelationDisplayItem {
+  label: string;
+  filePath: string | null;
+}
+
 function getColumnTypeLabel(type: ColumnType): string {
   switch (type) {
     case 'text':
@@ -88,6 +102,8 @@ function getColumnTypeLabel(type: ColumnType): string {
       return 'Multi select';
     case 'relation':
       return 'Relation';
+    case 'multi-relation':
+      return 'Multi relation';
     default:
       return type;
   }
@@ -216,8 +232,7 @@ class DatabaseTableView extends ItemView {
 
     const watchedFolders = new Set<string>([definition.table.sourceFolder]);
     for (const column of definition.table.columns) {
-      if (column.type !== 'relation' || !column.relation) continue;
-      const targetTable = this.plugin.data.tables[column.relation.tableId];
+      const targetTable = this.getRelationTargetTable(column);
       if (targetTable) {
         watchedFolders.add(targetTable.sourceFolder);
       }
@@ -739,12 +754,20 @@ class DatabaseTableView extends ItemView {
     return segments[segments.length - 1] ?? table.sourceFolder;
   }
 
-  private getRelationFolderLabel(column: ColumnSchema): string | null {
-    if (column.type !== 'relation' || !column.relation) {
+  private getRelationTargetTable(column: ColumnSchema): TableSchema | null {
+    if ((column.type !== 'relation' && column.type !== 'multi-relation') || !column.relation) {
       return null;
     }
 
-    const targetTable = this.plugin.data.tables[column.relation.tableId];
+    return this.plugin.data.tables[column.relation.tableId] ?? null;
+  }
+
+  private getRelationFolderLabel(column: ColumnSchema): string | null {
+    if (column.type !== 'relation' && column.type !== 'multi-relation') {
+      return null;
+    }
+
+    const targetTable = this.getRelationTargetTable(column);
     return targetTable
       ? `Relation folder: ${targetTable.sourceFolder}`
       : 'Relation folder unavailable';
@@ -900,7 +923,7 @@ class DatabaseTableView extends ItemView {
     });
 
     const typeSelect = form.createEl('select', { cls: 'dtv-column-form-select' });
-    for (const type of ['text', 'checkbox', 'single-select', 'multi-select', 'relation'] as const) {
+    for (const type of ['text', 'checkbox', 'single-select', 'multi-select', 'relation', 'multi-relation'] as const) {
       const option = typeSelect.createEl('option', {
         value: type,
         text: getColumnTypeLabel(type),
@@ -912,7 +935,7 @@ class DatabaseTableView extends ItemView {
       this.renderColumnManagerPanel(panel, table, view);
     });
 
-    if (this.columnFormState.type === 'relation') {
+    if (this.columnFormState.type === 'relation' || this.columnFormState.type === 'multi-relation') {
       const relationButton = form.createEl('button', {
         cls: 'dtv-folder-button',
         text: this.columnFormState.relationFolder || 'Choose relation folder',
@@ -929,7 +952,7 @@ class DatabaseTableView extends ItemView {
     const addButton = form.createEl('button', { cls: 'dtv-action-button', text: 'Add column' });
     addButton.addEventListener('click', async () => {
       let relationTableId: string | null = null;
-      if (this.columnFormState.type === 'relation') {
+      if (this.columnFormState.type === 'relation' || this.columnFormState.type === 'multi-relation') {
         if (!this.columnFormState.relationFolder) {
           new Notice('Choose a relation folder');
           return;
@@ -1065,6 +1088,9 @@ class DatabaseTableView extends ItemView {
       case 'relation':
         this.renderRelationCell(cell, row, column);
         return;
+      case 'multi-relation':
+        this.renderMultiRelationCell(cell, row, column);
+        return;
       case 'text':
       default:
         this.renderTextCell(cell, row, column);
@@ -1137,6 +1163,16 @@ class DatabaseTableView extends ItemView {
     });
   }
 
+  private renderMultiRelationCell(cell: HTMLElement, row: RowRecord, column: ColumnSchema): void {
+    cell.addClass('dtv-cell-editable');
+    this.renderRelationTagList(cell, this.getRelationDisplayItems(row, column), row.filePath);
+    cell.addEventListener('click', (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest('a')) return;
+      event.stopPropagation();
+      void this.showMultiRelationPicker(cell, row, column);
+    });
+  }
+
   private renderTagList(cell: HTMLElement, values: string[]): void {
     cell.empty();
     if (values.length === 0) {
@@ -1148,6 +1184,29 @@ class DatabaseTableView extends ItemView {
     for (const value of values) {
       const tag = list.createSpan({ cls: 'dtv-tag', text: value });
       tag.style.setProperty('--dtv-tag-hue', String(hashString(value) % 360));
+    }
+  }
+
+  private renderRelationTagList(cell: HTMLElement, values: RelationDisplayItem[], sourcePath: string): void {
+    cell.empty();
+    if (values.length === 0) {
+      cell.createDiv({ cls: 'dtv-cell-placeholder', text: '' });
+      return;
+    }
+
+    const list = cell.createDiv({ cls: 'dtv-tag-list' });
+    for (const value of values) {
+      const tag = value.filePath
+        ? list.createEl('a', { cls: 'dtv-tag dtv-tag-link internal-link', text: value.label })
+        : list.createSpan({ cls: 'dtv-tag', text: value.label });
+      tag.style.setProperty('--dtv-tag-hue', String(hashString(value.label) % 360));
+      if (tag instanceof HTMLAnchorElement && value.filePath) {
+        tag.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.app.workspace.openLinkText(value.filePath!, sourcePath);
+        });
+      }
     }
   }
 
@@ -1392,13 +1451,158 @@ class DatabaseTableView extends ItemView {
     }, restore);
   }
 
+  private buildRawRelationEntryId(rawValue: string): string {
+    return `${RAW_RELATION_ENTRY_PREFIX}${rawValue}`;
+  }
+
+  private getRawRelationEntryValue(entryId: string): string | null {
+    return entryId.startsWith(RAW_RELATION_ENTRY_PREFIX)
+      ? entryId.slice(RAW_RELATION_ENTRY_PREFIX.length)
+      : null;
+  }
+
+  private getCreateRelationEntryName(entryId: string): string | null {
+    if (!entryId.startsWith(CREATE_RELATION_ENTRY_PREFIX)) {
+      return null;
+    }
+
+    const rawName = entryId.slice(CREATE_RELATION_ENTRY_PREFIX.length).trim();
+    return rawName || null;
+  }
+
+  private buildRelationPickerEntries(
+    targetRows: RowRecord[],
+    targetTable: TableSchema,
+    query: string,
+    selectedIds: Set<string>,
+  ): PickerEntry[] {
+    const trimmedQuery = query.trim();
+    const normalizedQuery = trimmedQuery.toLowerCase();
+    const entries: PickerEntry[] = [];
+
+    for (const selectedId of selectedIds) {
+      const rawRelationValue = this.getRawRelationEntryValue(selectedId);
+      if (rawRelationValue !== null) {
+        entries.push({
+          id: selectedId,
+          label: this.extractRelationLabel(rawRelationValue),
+          meta: 'Unresolved relation',
+          selected: true,
+        });
+        continue;
+      }
+
+      const createName = this.getCreateRelationEntryName(selectedId);
+      if (!createName) continue;
+      entries.push({
+        id: selectedId,
+        label: createName,
+        meta: `Create in ${targetTable.sourceFolder}`,
+        selected: true,
+        create: true,
+      });
+    }
+
+    if (trimmedQuery) {
+      const createEntryId = `${CREATE_RELATION_ENTRY_PREFIX}${trimmedQuery}`;
+      const hasExactMatch = targetRows.some((candidate) => candidate.name.toLowerCase() === normalizedQuery);
+      if (!hasExactMatch && !entries.some((entry) => entry.id === createEntryId)) {
+        entries.unshift({
+          id: createEntryId,
+          label: trimmedQuery,
+          meta: `Create in ${targetTable.sourceFolder}`,
+          selected: false,
+          create: true,
+        });
+      }
+    }
+
+    entries.push(...targetRows
+      .filter((candidate) => candidate.name.toLowerCase().includes(normalizedQuery))
+      .map((candidate) => ({
+        id: candidate.filePath,
+        label: candidate.name,
+        meta: targetTable.sourceFolder,
+        selected: selectedIds.has(candidate.filePath),
+      })));
+
+    return entries;
+  }
+
+  private async materializeRelationSelectionValues(
+    selectedIds: string[],
+    targetRows: RowRecord[],
+    targetTable: TableSchema,
+    sourcePath: string,
+  ): Promise<string[] | null> {
+    const pendingCreateValidations = new Map<string, { baseName: string; filePath: string }>();
+    const pendingFilePaths = new Set<string>();
+
+    for (const selectedId of selectedIds) {
+      const createName = this.getCreateRelationEntryName(selectedId);
+      if (!createName) continue;
+
+      const validation = validateRowName(this.app, targetTable, createName);
+      if (!validation.ok) {
+        if (validation.reason === 'duplicate') {
+          new Notice(`"${createName}" already exists in ${targetTable.sourceFolder}`);
+        } else {
+          new Notice('Relation name is invalid');
+        }
+        return null;
+      }
+      if (pendingFilePaths.has(validation.filePath)) {
+        new Notice(`"${createName}" duplicates another new relation in ${targetTable.sourceFolder}`);
+        return null;
+      }
+
+      pendingFilePaths.add(validation.filePath);
+      pendingCreateValidations.set(selectedId, validation);
+    }
+
+    const relationValues: string[] = [];
+    for (const selectedId of selectedIds) {
+      const rawRelationValue = this.getRawRelationEntryValue(selectedId);
+      if (rawRelationValue !== null) {
+        relationValues.push(rawRelationValue);
+        continue;
+      }
+
+      const createName = this.getCreateRelationEntryName(selectedId);
+      if (createName) {
+        const validation = pendingCreateValidations.get(selectedId);
+        if (!validation) continue;
+
+        try {
+          const createdFile = await createRowFile(this.app, targetTable, validation.baseName);
+          relationValues.push(this.buildRelationValue(createdFile, sourcePath));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown';
+          new Notice(`Create relation failed: ${message}`);
+          return null;
+        }
+        continue;
+      }
+
+      const targetRow = targetRows.find((candidate) => candidate.filePath === selectedId);
+      if (!targetRow) {
+        new Notice('Selected relation is no longer available');
+        return null;
+      }
+
+      relationValues.push(this.buildRelationValue(targetRow.file, sourcePath));
+    }
+
+    return relationValues;
+  }
+
   private async showRelationPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): Promise<void> {
     if (!column.relation) {
       new Notice(`"${column.name}" is missing a relation target`);
       return;
     }
 
-    const targetTable = this.plugin.data.tables[column.relation.tableId];
+    const targetTable = this.getRelationTargetTable(column);
     if (!targetTable) {
       new Notice(`"${column.name}" relation target is unavailable`);
       return;
@@ -1406,77 +1610,68 @@ class DatabaseTableView extends ItemView {
 
     const targetRows = await loadRows(this.app, targetTable);
     const currentRelation = this.resolveRelationRow(row, column);
-    const createEntryPrefix = '__dtv_create_relation__:';
     const restore = (): void => {
       void this.render();
     };
-    const { input, selectionHost } = this.createComboboxEditor(anchor, 'single', 'Search related rows...', currentRelation?.name ?? '');
+    const currentValue = this.getCellTextValue(row, column);
+    const { input, selectionHost } = this.createComboboxEditor(anchor, 'single', 'Search related rows...', currentValue);
     this.openSearchPicker(anchor, input, selectionHost, {
       mode: 'single',
       placeholder: 'Search related rows...',
-      initialQuery: currentRelation?.name ?? '',
+      initialQuery: currentValue,
       initialSelectedIds: currentRelation ? [currentRelation.filePath] : [],
       allowClear: true,
-      buildEntries: (query) => {
-        const trimmedQuery = query.trim();
-        const normalizedQuery = trimmedQuery.toLowerCase();
-        const entries: PickerEntry[] = targetRows
-          .filter((candidate) => candidate.name.toLowerCase().includes(normalizedQuery))
-          .map((candidate) => ({
-            id: candidate.filePath,
-            label: candidate.name,
-            meta: targetTable.sourceFolder,
-            selected: currentRelation?.filePath === candidate.filePath,
-          }));
-        const hasExactMatch = targetRows.some((candidate) => candidate.name.toLowerCase() === normalizedQuery);
-        if (trimmedQuery && !hasExactMatch) {
-          entries.unshift({
-            id: `${createEntryPrefix}${trimmedQuery}`,
-            label: trimmedQuery,
-            meta: `Create in ${targetTable.sourceFolder}`,
-            selected: false,
-            create: true,
-          });
-        }
-        return entries;
-      },
+      buildEntries: (query, selectedIds) => this.buildRelationPickerEntries(targetRows, targetTable, query, selectedIds),
       onCommit: async (selectedIds) => {
-        const selectedId = selectedIds[0];
-        if (!selectedId) {
+        if (selectedIds.length === 0) {
           await updateColumnValue(this.app, row, column, '');
           this.requestRefresh();
           return;
         }
 
-        if (selectedId.startsWith(createEntryPrefix)) {
-          const rawName = selectedId.slice(createEntryPrefix.length);
-          const validation = validateRowName(this.app, targetTable, rawName);
-          if (!validation.ok) {
-            if (validation.reason === 'duplicate') {
-              new Notice(`"${rawName.trim()}" already exists in ${targetTable.sourceFolder}`);
-            } else {
-              new Notice('Relation name is invalid');
-            }
-            restore();
-            return;
-          }
-
-          try {
-            const createdFile = await createRowFile(this.app, targetTable, validation.baseName);
-            await updateColumnValue(this.app, row, column, this.buildRelationValue(createdFile, row.filePath));
-            this.requestRefresh();
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'unknown';
-            new Notice(`Create relation failed: ${message}`);
-            restore();
-          }
+        const relationValues = await this.materializeRelationSelectionValues(selectedIds.slice(0, 1), targetRows, targetTable, row.filePath);
+        if (!relationValues) {
+          restore();
           return;
         }
 
-        const targetRow = targetRows.find((candidate) => candidate.filePath === selectedId);
-        if (!targetRow) return;
+        await updateColumnValue(this.app, row, column, relationValues[0] ?? '');
+        this.requestRefresh();
+      },
+    }, restore);
+  }
 
-        await updateColumnValue(this.app, row, column, this.buildRelationValue(targetRow.file, row.filePath));
+  private async showMultiRelationPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): Promise<void> {
+    if (!column.relation) {
+      new Notice(`"${column.name}" is missing a relation target`);
+      return;
+    }
+
+    const targetTable = this.getRelationTargetTable(column);
+    if (!targetTable) {
+      new Notice(`"${column.name}" relation target is unavailable`);
+      return;
+    }
+
+    const targetRows = await loadRows(this.app, targetTable);
+    const restore = (): void => {
+      void this.render();
+    };
+    const { input, selectionHost } = this.createComboboxEditor(anchor, 'multiple', 'Search related rows...', '');
+    this.openSearchPicker(anchor, input, selectionHost, {
+      mode: 'multiple',
+      placeholder: 'Search related rows...',
+      initialSelectedIds: this.getRelationSelectionIds(row, column),
+      allowClear: true,
+      buildEntries: (query, selectedIds) => this.buildRelationPickerEntries(targetRows, targetTable, query, selectedIds),
+      onCommit: async (selectedIds) => {
+        const relationValues = await this.materializeRelationSelectionValues(selectedIds, targetRows, targetTable, row.filePath);
+        if (!relationValues) {
+          restore();
+          return;
+        }
+
+        await updateColumnValue(this.app, row, column, relationValues);
         this.requestRefresh();
       },
     }, restore);
@@ -1644,9 +1839,8 @@ class DatabaseTableView extends ItemView {
   }
 
   private getCellTextValue(row: RowRecord, column: ColumnSchema): string {
-    if (column.type === 'relation') {
-      const resolved = this.resolveRelationRow(row, column);
-      return resolved?.name ?? this.extractRelationLabel(row.values[column.id]);
+    if (column.type === 'relation' || column.type === 'multi-relation') {
+      return this.getRelationDisplayItems(row, column).map((item) => item.label).join(', ');
     }
 
     const rawValue = row.values[column.id];
@@ -1665,17 +1859,38 @@ class DatabaseTableView extends ItemView {
     return match[2] ?? match[1] ?? '';
   }
 
-  private resolveRelationRow(row: RowRecord, column: ColumnSchema): RowRecord | null {
-    if (!column.relation) return null;
-    const targetTable = this.plugin.data.tables[column.relation.tableId];
-    if (!targetTable) return null;
+  private parseRelationValuePart(rawValue: string): RelationValuePart {
+    const trimmed = rawValue.trim();
+    const match = trimmed.match(WIKILINK_RE);
+    return {
+      rawValue: trimmed,
+      target: match?.[1] ?? trimmed,
+      label: match?.[2] ?? match?.[1] ?? trimmed,
+    };
+  }
 
-    const rawValue = row.values[column.id];
-    if (typeof rawValue !== 'string' || !rawValue.trim()) return null;
+  private getRelationValueParts(rawValue: unknown, allowMultiple: boolean): RelationValuePart[] {
+    if (Array.isArray(rawValue)) {
+      const values = rawValue.map((value) => String(value).trim()).filter(Boolean);
+      return (allowMultiple ? values : values.slice(0, 1)).map((value) => this.parseRelationValuePart(value));
+    }
 
-    const match = rawValue.trim().match(WIKILINK_RE);
-    const linkTarget = match?.[1] ?? rawValue.trim();
-    const file = this.app.metadataCache.getFirstLinkpathDest(linkTarget, row.filePath);
+    if (typeof rawValue !== 'string') return [];
+    const trimmed = rawValue.trim();
+    if (!trimmed) return [];
+    if (!allowMultiple) {
+      return [this.parseRelationValuePart(trimmed)];
+    }
+
+    const matches = [...trimmed.matchAll(WIKILINK_GLOBAL_RE)].map((match) => match[0].trim()).filter(Boolean);
+    const values = matches.length > 0
+      ? matches
+      : trimmed.split(',').map((value) => value.trim()).filter(Boolean);
+    return values.map((value) => this.parseRelationValuePart(value));
+  }
+
+  private resolveRelationValuePart(rowFilePath: string, targetTable: TableSchema, part: RelationValuePart): RowRecord | null {
+    const file = this.app.metadataCache.getFirstLinkpathDest(part.target, rowFilePath);
     if (!file || !file.path.startsWith(`${targetTable.sourceFolder}/`)) return null;
 
     return {
@@ -1684,6 +1899,44 @@ class DatabaseTableView extends ItemView {
       name: file.basename,
       values: {},
     };
+  }
+
+  private getRelationDisplayItems(row: RowRecord, column: ColumnSchema): RelationDisplayItem[] {
+    const parts = this.getRelationValueParts(row.values[column.id], column.type === 'multi-relation');
+    const targetTable = this.getRelationTargetTable(column);
+    if (!targetTable) {
+      return parts.map((part) => ({ label: part.label, filePath: null }));
+    }
+
+    return parts.map((part) => {
+      const resolved = this.resolveRelationValuePart(row.filePath, targetTable, part);
+      return {
+        label: resolved?.name ?? part.label,
+        filePath: resolved?.filePath ?? null,
+      };
+    });
+  }
+
+  private getRelationSelectionIds(row: RowRecord, column: ColumnSchema): string[] {
+    const parts = this.getRelationValueParts(row.values[column.id], column.type === 'multi-relation');
+    const targetTable = this.getRelationTargetTable(column);
+    if (!targetTable) {
+      return parts.map((part) => this.buildRawRelationEntryId(part.rawValue));
+    }
+
+    return parts.map((part) => {
+      const resolved = this.resolveRelationValuePart(row.filePath, targetTable, part);
+      return resolved?.filePath ?? this.buildRawRelationEntryId(part.rawValue);
+    });
+  }
+
+  private resolveRelationRow(row: RowRecord, column: ColumnSchema): RowRecord | null {
+    const targetTable = this.getRelationTargetTable(column);
+    if (!targetTable) return null;
+
+    const part = this.getRelationValueParts(row.values[column.id], false)[0];
+    if (!part) return null;
+    return this.resolveRelationValuePart(row.filePath, targetTable, part);
   }
 
   private sortRows(rows: RowRecord[], sort: SortState | null, table: TableSchema): RowRecord[] {

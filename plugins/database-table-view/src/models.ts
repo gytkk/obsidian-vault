@@ -3,7 +3,7 @@ import type { TFile } from 'obsidian';
 export const DATA_VERSION = 1;
 export const NAME_COLUMN_ID = '__name__';
 
-export type ColumnType = 'text' | 'checkbox' | 'single-select' | 'multi-select' | 'relation';
+export type ColumnType = 'text' | 'checkbox' | 'single-select' | 'multi-select' | 'relation' | 'multi-relation';
 
 export interface RelationConfig {
   tableId: string;
