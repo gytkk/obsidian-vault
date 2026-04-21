@@ -796,35 +796,18 @@ class DatabaseTableView extends ItemView {
       });
 
       const meta = item.createDiv({ cls: 'dtv-column-meta' });
-      meta.createDiv({ cls: 'dtv-column-name', text: column.name });
-      meta.createDiv({ cls: 'dtv-column-type', text: getColumnTypeLabel(column.type) });
+      const nameLabel = meta.createDiv({
+        cls: 'dtv-column-name',
+        text: column.name,
+        attr: { title: 'Double-click to rename' },
+      });
+      nameLabel.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.editColumnName(nameLabel, item, panel, table, view, column);
+      });
 
       const actions = item.createDiv({ cls: 'dtv-column-actions' });
-      const renameButton = actions.createEl('button', {
-        cls: 'dtv-column-rename',
-        text: 'Rename',
-        attr: { type: 'button' },
-      });
-      renameButton.addEventListener('click', async () => {
-        const nextName = window.prompt('Column name', column.name);
-        if (nextName === null) return;
-
-        const result = renameColumn(table, column.id, nextName);
-        if (result.status === 'invalid') {
-          new Notice('Column name is invalid');
-          return;
-        }
-        if (result.status === 'conflict') {
-          new Notice(`A column named "${nextName.trim()}" already exists`);
-          return;
-        }
-        if (result.previousName && result.previousName !== result.column?.name) {
-          await renameColumnProperty(this.app, table, result.previousName, result.column?.name ?? result.previousName);
-        }
-        await this.persistPluginData();
-        await this.render();
-      });
-
       const deleteButton = actions.createEl('button', {
         cls: 'dtv-column-delete',
         text: 'Delete',
@@ -1138,6 +1121,98 @@ class DatabaseTableView extends ItemView {
       const tag = list.createSpan({ cls: 'dtv-tag', text: value });
       tag.style.setProperty('--dtv-tag-hue', String(hashString(value) % 360));
     }
+  }
+
+  private editColumnName(
+    label: HTMLElement,
+    item: HTMLElement,
+    panel: HTMLElement,
+    table: TableSchema,
+    view: TableViewDefinition,
+    column: ColumnSchema,
+  ): void {
+    if (label.querySelector('input')) return;
+
+    const oldName = column.name;
+    item.draggable = false;
+    label.empty();
+
+    const input = label.createEl('input', {
+      cls: 'dtv-cell-input dtv-column-name-input',
+      type: 'text',
+      value: oldName,
+      attr: { 'aria-label': `Rename column ${oldName}` },
+    });
+
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+
+    const restore = (): void => {
+      item.draggable = true;
+      this.renderColumnManagerPanel(panel, table, view);
+    };
+
+    let handled = false;
+    const commit = async (): Promise<void> => {
+      if (handled) return;
+      handled = true;
+
+      const nextName = input.value.trim();
+      if (nextName === oldName) {
+        restore();
+        return;
+      }
+
+      const result = renameColumn(table, column.id, nextName);
+      if (result.status === 'invalid') {
+        new Notice('Column name is invalid');
+        restore();
+        return;
+      }
+      if (result.status === 'conflict') {
+        new Notice(`A column named "${nextName}" already exists`);
+        restore();
+        return;
+      }
+
+      try {
+        if (result.previousName && result.previousName !== result.column?.name) {
+          await renameColumnProperty(this.app, table, result.previousName, result.column?.name ?? result.previousName);
+        }
+        await this.persistPluginData();
+        await this.render();
+      } catch (error) {
+        if (result.column && result.previousName) {
+          result.column.name = result.previousName;
+        }
+        const message = error instanceof Error ? error.message : 'unknown';
+        new Notice(`Rename column failed: ${message}`);
+        restore();
+      }
+    };
+
+    input.addEventListener('blur', () => {
+      void commit();
+    });
+    input.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener('dblclick', (event) => {
+      event.stopPropagation();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handled = true;
+        restore();
+      }
+    });
   }
 
   private async deleteColumn(table: TableSchema, columnId: string): Promise<void> {
