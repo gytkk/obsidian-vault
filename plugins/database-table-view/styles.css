@@ -523,6 +523,15 @@
   text-overflow: ellipsis;
 }
 
+.dtv-column-context {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dtv-column-empty {
   color: var(--dtv-ink-soft);
   font-size: var(--font-ui-smaller);

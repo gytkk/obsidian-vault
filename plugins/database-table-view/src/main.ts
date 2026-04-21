@@ -738,6 +738,17 @@ class DatabaseTableView extends ItemView {
     return segments[segments.length - 1] ?? table.sourceFolder;
   }
 
+  private getRelationFolderLabel(column: ColumnSchema): string | null {
+    if (column.type !== 'relation' || !column.relation) {
+      return null;
+    }
+
+    const targetTable = this.plugin.data.tables[column.relation.tableId];
+    return targetTable
+      ? `Relation folder: ${targetTable.sourceFolder}`
+      : 'Relation folder unavailable';
+  }
+
   private renderColumnManagerButton(toolbar: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
     const button = toolbar.createEl('button', { cls: 'dtv-action-button', text: 'Columns' });
     let panel: HTMLElement | null = null;
@@ -806,6 +817,15 @@ class DatabaseTableView extends ItemView {
         event.stopPropagation();
         this.editColumnName(nameLabel, item, panel, table, view, column);
       });
+
+      const relationFolderLabel = this.getRelationFolderLabel(column);
+      if (relationFolderLabel) {
+        meta.createDiv({
+          cls: 'dtv-column-context',
+          text: relationFolderLabel,
+          attr: { title: relationFolderLabel },
+        });
+      }
 
       const actions = item.createDiv({ cls: 'dtv-column-actions' });
       const deleteButton = actions.createEl('button', {
