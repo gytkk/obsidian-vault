@@ -368,6 +368,14 @@ export function setColumnHidden(table: TableSchema, columnId: string, hidden: bo
   return true;
 }
 
+export function removeColumn(table: TableSchema, columnId: string): ColumnSchema | null {
+  const index = table.columns.findIndex((column) => column.id === columnId);
+  if (index === -1) return null;
+
+  const [removed] = table.columns.splice(index, 1);
+  return removed ?? null;
+}
+
 export function reorderColumn(view: TableViewDefinition, columnId: string, targetIndex: number): boolean {
   const currentIndex = view.columnOrder.indexOf(columnId);
   if (currentIndex === -1 || currentIndex === targetIndex) return false;

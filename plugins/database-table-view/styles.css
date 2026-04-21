@@ -510,6 +510,12 @@
   min-width: 0;
 }
 
+.dtv-column-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .dtv-column-name {
   color: var(--text-normal);
   white-space: nowrap;
@@ -535,6 +541,20 @@
 
 .dtv-column-rename:hover {
   color: var(--text-normal);
+}
+
+.dtv-column-delete {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+.dtv-column-delete:hover {
+  color: var(--text-error);
 }
 
 .dtv-column-form {

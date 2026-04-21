@@ -210,6 +210,29 @@ export async function removeSelectOptionFromRows(
   return changedCount;
 }
 
+export async function removeColumnProperty(
+  app: App,
+  table: TableSchema,
+  columnName: string,
+): Promise<number> {
+  const files = await collectMarkdownFiles(app, table.sourceFolder);
+  let changedCount = 0;
+
+  for (const file of files) {
+    const frontmatter = await readFrontmatter(app, file);
+    if (!(columnName in frontmatter)) {
+      continue;
+    }
+
+    await app.fileManager.processFrontMatter(file, (nextFrontmatter: Record<string, unknown>) => {
+      delete nextFrontmatter[columnName];
+    });
+    changedCount += 1;
+  }
+
+  return changedCount;
+}
+
 export async function renameColumnProperty(
   app: App,
   table: TableSchema,

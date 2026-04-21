@@ -13,6 +13,7 @@ import {
   createRowFile,
   deleteRowFile,
   loadRows,
+  removeColumnProperty,
   renameColumnProperty,
   renameRowFile,
   removeSelectOptionFromRows,
@@ -36,11 +37,13 @@ import {
   getOrderedColumns,
   getTableAndView,
   rememberRecentView,
+  removeColumn,
   renameColumn,
   renameTableSourceFolder,
   reorderColumn,
   sanitizePluginData,
   setColumnHidden,
+  syncViewColumnOrder,
 } from './store';
 
 const VIEW_TYPE = 'database-table-view';
@@ -796,7 +799,12 @@ class DatabaseTableView extends ItemView {
       meta.createDiv({ cls: 'dtv-column-name', text: column.name });
       meta.createDiv({ cls: 'dtv-column-type', text: getColumnTypeLabel(column.type) });
 
-      const renameButton = item.createEl('button', { cls: 'dtv-column-rename', text: 'Rename' });
+      const actions = item.createDiv({ cls: 'dtv-column-actions' });
+      const renameButton = actions.createEl('button', {
+        cls: 'dtv-column-rename',
+        text: 'Rename',
+        attr: { type: 'button' },
+      });
       renameButton.addEventListener('click', async () => {
         const nextName = window.prompt('Column name', column.name);
         if (nextName === null) return;
@@ -815,6 +823,22 @@ class DatabaseTableView extends ItemView {
         }
         await this.persistPluginData();
         await this.render();
+      });
+
+      const deleteButton = actions.createEl('button', {
+        cls: 'dtv-column-delete',
+        text: 'Delete',
+        attr: { type: 'button' },
+      });
+      deleteButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          await this.deleteColumn(table, column.id);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown';
+          new Notice(`Delete column failed: ${message}`);
+        }
       });
 
       item.addEventListener('dragstart', (event) => {
@@ -1114,6 +1138,24 @@ class DatabaseTableView extends ItemView {
       const tag = list.createSpan({ cls: 'dtv-tag', text: value });
       tag.style.setProperty('--dtv-tag-hue', String(hashString(value) % 360));
     }
+  }
+
+  private async deleteColumn(table: TableSchema, columnId: string): Promise<void> {
+    const column = table.columns.find((candidate) => candidate.id === columnId);
+    if (!column) return;
+
+    await removeColumnProperty(this.app, table, column.name);
+
+    const removed = removeColumn(table, columnId);
+    if (!removed) return;
+
+    for (const candidateView of Object.values(this.plugin.data.views)) {
+      if (candidateView.tableId !== table.id) continue;
+      syncViewColumnOrder(table, candidateView);
+    }
+
+    await this.persistPluginData();
+    await this.render();
   }
 
   private async deleteSelectOption(columnId: string, option: string): Promise<void> {
