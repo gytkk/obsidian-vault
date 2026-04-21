@@ -159,6 +159,57 @@ export async function updateColumnValue(
   });
 }
 
+export async function removeSelectOptionFromRows(
+  app: App,
+  table: TableSchema,
+  column: ColumnSchema,
+  option: string,
+): Promise<number> {
+  if (column.type !== 'single-select' && column.type !== 'multi-select') {
+    return 0;
+  }
+
+  const files = await collectMarkdownFiles(app, table.sourceFolder);
+  let changedCount = 0;
+
+  for (const file of files) {
+    const frontmatter = await readFrontmatter(app, file);
+    const currentValue = normalizeColumnValue(column, frontmatter[column.name]);
+
+    if (column.type === 'single-select' && currentValue !== option) {
+      continue;
+    }
+
+    if (column.type === 'multi-select') {
+      const currentValues = Array.isArray(currentValue) ? currentValue : [];
+      if (!currentValues.includes(option)) {
+        continue;
+      }
+    }
+
+    await app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+      const currentValue = normalizeColumnValue(column, frontmatter[column.name]);
+
+      if (column.type === 'single-select') {
+        delete frontmatter[column.name];
+        return;
+      }
+
+      const currentValues = Array.isArray(currentValue) ? currentValue : [];
+      const nextValues = currentValues.filter((value) => value !== option);
+      const serialized = serializeColumnValue(column, nextValues);
+      if (serialized === undefined) {
+        delete frontmatter[column.name];
+      } else {
+        frontmatter[column.name] = serialized;
+      }
+    });
+    changedCount += 1;
+  }
+
+  return changedCount;
+}
+
 export async function renameColumnProperty(
   app: App,
   table: TableSchema,

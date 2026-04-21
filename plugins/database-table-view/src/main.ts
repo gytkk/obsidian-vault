@@ -15,6 +15,7 @@ import {
   loadRows,
   renameColumnProperty,
   renameRowFile,
+  removeSelectOptionFromRows,
   updateColumnValue,
   validateRowName,
 } from './frontmatter';
@@ -68,6 +69,7 @@ interface SearchPickerConfig {
   allowClear: boolean;
   buildEntries: (query: string, selectedIds: Set<string>) => PickerEntry[];
   onCommit: (selectedIds: string[]) => Promise<void>;
+  onDeleteEntry?: (entryId: string) => Promise<void>;
 }
 
 function getColumnTypeLabel(type: ColumnType): string {
@@ -418,13 +420,34 @@ class DatabaseTableView extends ItemView {
           content.createDiv({ cls: 'dtv-picker-item-meta', text: entry.meta });
         }
 
-        const state = item.createDiv({ cls: 'dtv-picker-item-state' });
+        const actions = item.createDiv({ cls: 'dtv-picker-item-actions' });
+        const state = actions.createDiv({ cls: 'dtv-picker-item-state' });
         if (entry.create) {
           state.setText('Create');
         } else if (entry.clear) {
           state.setText('Reset');
         } else if (entry.selected) {
           state.setText(config.mode === 'multiple' ? 'Added' : 'Selected');
+        }
+
+        if (config.onDeleteEntry && !entry.create && !entry.clear) {
+          const removeButton = actions.createEl('button', {
+            cls: 'dtv-picker-item-remove',
+            text: 'X',
+            attr: { 'aria-label': `Delete option ${entry.label}` },
+          });
+          removeButton.type = 'button';
+          removeButton.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+              await config.onDeleteEntry?.(entry.id);
+              selectedIds.delete(entry.id);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'unknown';
+              new Notice(`Delete option failed: ${message}`);
+            }
+          });
         }
 
         item.addEventListener('mouseenter', () => {
@@ -1093,6 +1116,35 @@ class DatabaseTableView extends ItemView {
     }
   }
 
+  private async deleteSelectOption(columnId: string, option: string): Promise<void> {
+    const definition = this.getCurrentDefinition();
+    if (!definition) return;
+
+    const column = definition.table.columns.find((candidate) => candidate.id === columnId);
+    if (!column || (column.type !== 'single-select' && column.type !== 'multi-select')) {
+      return;
+    }
+
+    this.closeActivePicker();
+
+    try {
+      await removeSelectOptionFromRows(this.app, definition.table, column, option);
+
+      if (column.options.includes(option)) {
+        const previousOptions = [...column.options];
+        column.options = previousOptions.filter((candidate) => candidate !== option);
+        try {
+          await this.persistPluginData();
+        } catch (error) {
+          column.options = previousOptions;
+          throw error;
+        }
+      }
+    } finally {
+      this.requestRefresh();
+    }
+  }
+
   private showSingleSelectPicker(anchor: HTMLElement, row: RowRecord, column: ColumnSchema): void {
     const currentValue = this.getCellTextValue(row, column);
     const restore = (): void => {
@@ -1134,6 +1186,9 @@ class DatabaseTableView extends ItemView {
         }
         await updateColumnValue(this.app, row, column, nextValue);
         this.requestRefresh();
+      },
+      onDeleteEntry: async (entryId) => {
+        await this.deleteSelectOption(column.id, entryId);
       },
     }, restore);
   }
@@ -1185,6 +1240,9 @@ class DatabaseTableView extends ItemView {
         }
         await updateColumnValue(this.app, row, column, selectedIds);
         this.requestRefresh();
+      },
+      onDeleteEntry: async (entryId) => {
+        await this.deleteSelectOption(column.id, entryId);
       },
     }, restore);
   }
