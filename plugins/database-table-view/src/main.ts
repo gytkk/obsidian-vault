@@ -5,6 +5,7 @@ import {
   Notice,
   Plugin,
   TAbstractFile,
+  TFile,
   TFolder,
   WorkspaceLeaf,
 } from 'obsidian';
@@ -749,6 +750,13 @@ class DatabaseTableView extends ItemView {
       : 'Relation folder unavailable';
   }
 
+  private buildRelationValue(targetFile: TFile, sourcePath: string): string {
+    const linkText = this.app.metadataCache.fileToLinktext(targetFile, sourcePath, true);
+    return linkText === targetFile.basename
+      ? `[[${linkText}]]`
+      : `[[${linkText}|${targetFile.basename}]]`;
+  }
+
   private renderColumnManagerButton(toolbar: HTMLElement, table: TableSchema, view: TableViewDefinition): void {
     const button = toolbar.createEl('button', { cls: 'dtv-action-button', text: 'Columns' });
     let panel: HTMLElement | null = null;
@@ -1398,6 +1406,7 @@ class DatabaseTableView extends ItemView {
 
     const targetRows = await loadRows(this.app, targetTable);
     const currentRelation = this.resolveRelationRow(row, column);
+    const createEntryPrefix = '__dtv_create_relation__:';
     const restore = (): void => {
       void this.render();
     };
@@ -1409,8 +1418,9 @@ class DatabaseTableView extends ItemView {
       initialSelectedIds: currentRelation ? [currentRelation.filePath] : [],
       allowClear: true,
       buildEntries: (query) => {
-        const normalizedQuery = query.trim().toLowerCase();
-        return targetRows
+        const trimmedQuery = query.trim();
+        const normalizedQuery = trimmedQuery.toLowerCase();
+        const entries: PickerEntry[] = targetRows
           .filter((candidate) => candidate.name.toLowerCase().includes(normalizedQuery))
           .map((candidate) => ({
             id: candidate.filePath,
@@ -1418,6 +1428,17 @@ class DatabaseTableView extends ItemView {
             meta: targetTable.sourceFolder,
             selected: currentRelation?.filePath === candidate.filePath,
           }));
+        const hasExactMatch = targetRows.some((candidate) => candidate.name.toLowerCase() === normalizedQuery);
+        if (trimmedQuery && !hasExactMatch) {
+          entries.unshift({
+            id: `${createEntryPrefix}${trimmedQuery}`,
+            label: trimmedQuery,
+            meta: `Create in ${targetTable.sourceFolder}`,
+            selected: false,
+            create: true,
+          });
+        }
+        return entries;
       },
       onCommit: async (selectedIds) => {
         const selectedId = selectedIds[0];
@@ -1427,14 +1448,35 @@ class DatabaseTableView extends ItemView {
           return;
         }
 
+        if (selectedId.startsWith(createEntryPrefix)) {
+          const rawName = selectedId.slice(createEntryPrefix.length);
+          const validation = validateRowName(this.app, targetTable, rawName);
+          if (!validation.ok) {
+            if (validation.reason === 'duplicate') {
+              new Notice(`"${rawName.trim()}" already exists in ${targetTable.sourceFolder}`);
+            } else {
+              new Notice('Relation name is invalid');
+            }
+            restore();
+            return;
+          }
+
+          try {
+            const createdFile = await createRowFile(this.app, targetTable, validation.baseName);
+            await updateColumnValue(this.app, row, column, this.buildRelationValue(createdFile, row.filePath));
+            this.requestRefresh();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown';
+            new Notice(`Create relation failed: ${message}`);
+            restore();
+          }
+          return;
+        }
+
         const targetRow = targetRows.find((candidate) => candidate.filePath === selectedId);
         if (!targetRow) return;
 
-        const linkText = this.app.metadataCache.fileToLinktext(targetRow.file, row.filePath, true);
-        const relationValue = linkText === targetRow.name
-          ? `[[${linkText}]]`
-          : `[[${linkText}|${targetRow.name}]]`;
-        await updateColumnValue(this.app, row, column, relationValue);
+        await updateColumnValue(this.app, row, column, this.buildRelationValue(targetRow.file, row.filePath));
         this.requestRefresh();
       },
     }, restore);
