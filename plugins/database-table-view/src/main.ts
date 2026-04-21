@@ -1522,7 +1522,6 @@ class DatabaseTableView extends ItemView {
       .map((candidate) => ({
         id: candidate.filePath,
         label: candidate.name,
-        meta: targetTable.sourceFolder,
         selected: selectedIds.has(candidate.filePath),
       })));
 
